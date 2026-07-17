@@ -36,7 +36,8 @@ from core import (
     HIGHER_AUTHORITY_EMAIL, CALL_CENTER_EMAIL, LANG_MAP,
 )
 from models import Policy, Office, OTP, Ticket, Notification, AuditLog
-from llm import translate_text, classify_intent
+from llm import translate_text, classify_intent, summarize_concern, generate_subject, draft_office_solution
+from mailer import send_email, OFFICIAL_TEMPLATE, team_for, chief_designation, department_for
 
 # ---------- setup ----------
 ROOT_DIR = Path(__file__).parent
@@ -61,8 +62,18 @@ async def audit(actor: str, action: str, entity: str, entity_ref: str | None = N
 
 
 async def push_notification(**kwargs) -> Notification:
+    """Persist a mock notification. If it's an email and Resend is configured,
+    also actually deliver via Resend and store the provider id."""
     n = Notification(**kwargs)
-    await db.notifications.insert_one(n.to_mongo())
+    doc = n.to_mongo()
+
+    if n.type == "email" and n.to:
+        result = await send_email(n.to, n.subject or "Samaadhaan", n.message)
+        doc["delivered"] = result.get("sent", False)
+        doc["provider_id"] = result.get("id")
+        doc["provider_error"] = result.get("error")
+
+    await db.notifications.insert_one(doc)
     return n
 
 
@@ -155,6 +166,69 @@ class TranslateReq(BaseModel):
 
 class ClassifyReq(BaseModel):
     text: str
+
+
+class AIEmailReq(BaseModel):
+    ticket_id: str            # id (uuid) of the ticket
+    role: Literal["customer", "office"] = "customer"   # who is "sending" the email
+    customer_email: Optional[str] = None    # optional override, else derived
+    signer_name: Optional[str] = None
+    signer_designation: Optional[str] = None
+
+
+# ============================================================
+# AI EMAIL DRAFTING — fixed official template
+# ============================================================
+@api.post("/emails/draft")
+async def draft_email(req: AIEmailReq):
+    """Generate a formatted official email for a ticket.
+    role=customer → email addressed to the office (Claims/Grievance/etc.) team
+    role=office   → same format but signed by the office officer, addressed to the customer
+    """
+    t = await db.tickets.find_one({"id": req.ticket_id}, {"_id": 0})
+    if not t:
+        raise HTTPException(404, "Ticket not found")
+
+    # AI-crafted subject + concern summary
+    subject = await generate_subject(t["parsed_text"])
+    concern = await summarize_concern(t["parsed_text"])
+
+    if req.role == "customer":
+        # From customer to their office team
+        team = team_for(t["service_type"])
+        signer_name = req.signer_name or (t.get("customer_name") or "Customer")
+        signer_designation = req.signer_designation or "Policyholder"
+        department = "—"
+        company = "—"
+    else:
+        # From office to the customer
+        off = await db.offices.find_one({"code": t["office_code"]}, {"_id": 0})
+        team = t.get("customer_name") or "Customer"
+        signer_name = req.signer_name or (off.get("name") if off else "Office")
+        signer_designation = req.signer_designation or chief_designation(t["service_type"])
+        department = department_for(t["service_type"])
+        company = "New India Assurance"
+
+    body = OFFICIAL_TEMPLATE.format(
+        team=team,
+        customer_name=t.get("customer_name") or "—",
+        policy_no=t.get("policy_no") or "—",
+        mobile=t.get("mobile") or "—",
+        customer_email=req.customer_email or "—",
+        subject=subject,
+        concern=concern,
+        signer_name=signer_name,
+        signer_designation=signer_designation,
+        department=department,
+        company=company,
+    )
+    return {
+        "subject": subject,
+        "body": body,
+        "to": t.get("target_email") if req.role == "customer" else None,
+        "team": team,
+        "signer_designation": signer_designation,
+    }
 
 
 # ============================================================
@@ -289,15 +363,24 @@ async def create_ticket(req: TicketCreateReq):
     )
     await db.tickets.insert_one(ticket.to_mongo())
 
-    # Mock email + SMS
+    # Compose email in the fixed OFFICIAL template
+    subject = f"[Samaadhaan] {service_type.upper()} — {ticket_id}"
+    email_body = OFFICIAL_TEMPLATE.format(
+        team=team_for(service_type),
+        customer_name=customer_name or "New Caller",
+        policy_no=req.policy_no or "—",
+        mobile=req.mobile,
+        customer_email="—",
+        subject=subject,
+        concern=req.parsed_text,
+        signer_name="Samaadhaan Bot",
+        signer_designation="Automated Intake",
+        department="Customer Dispatch Cell",
+        company="New India Assurance",
+    )
     await push_notification(
         type="email", to=target_email,
-        subject=f"[Samaadhaan] New {service_type.upper()} — {ticket_id}",
-        message=(
-            f"Ticket: {ticket_id}\nMobile: {req.mobile}\nPolicy: {req.policy_no or 'N/A'}\n"
-            f"Priority: {priority.upper()}\n\nParsed text ({req.language}):\n{req.parsed_text}\n\n(Audio attached)"
-        ),
-        ticket_id=ticket_id,
+        subject=subject, message=email_body, ticket_id=ticket_id,
     )
     await push_notification(
         type="sms", to=req.mobile,
@@ -624,6 +707,25 @@ async def classify(req: ClassifyReq):
 # ============================================================
 # ROOT
 # ============================================================
+@api.post("/admin/wipe")
+async def wipe_all(payload: dict = Depends(current_office)):
+    """Admin-only: purge tickets, notifications, and audit history. Keeps offices + policies."""
+    if payload.get("role") != "admin":
+        raise HTTPException(403, "Admin only")
+    r1 = await db.tickets.delete_many({})
+    r2 = await db.notifications.delete_many({})
+    r3 = await db.audits.delete_many({})
+    r4 = await db.otps.delete_many({})
+    await audit("admin", "wipe", "system", details={
+        "tickets": r1.deleted_count, "notifications": r2.deleted_count,
+        "audits": r3.deleted_count, "otps": r4.deleted_count,
+    })
+    return {
+        "tickets": r1.deleted_count, "notifications": r2.deleted_count,
+        "audits": r3.deleted_count, "otps": r4.deleted_count,
+    }
+
+
 @api.get("/")
 async def root():
     return {"service": "Samaadhaan API", "version": "2.0", "status": "ok"}

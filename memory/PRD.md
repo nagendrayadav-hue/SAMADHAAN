@@ -65,3 +65,10 @@ Multi-role New India Assurance customer service portal ("Samaadhaan") with:
 - **Mark-read** (`POST /api/inbox/{id}/mark-read`) tracks which envelopes an office has opened.
 - **Live polling** on the dashboard every 5s + toast on new incoming envelope — so an office truly sees customer mail land in real time.
 - 36/36 backend tests passed (iteration_2.json).
+
+## Update · 2026-07-17 (v2.2)
+- **Real email delivery** via Resend (`/app/backend/mailer.py`). Every ticket-creation email now actually posts through Resend and stores the provider `id` + delivery status on the notification. SMS remains mocked as requested.
+- **TEST_EMAIL_OVERRIDE** — because the current Resend key runs in sandbox mode (limited to the account owner's own address), all outbound emails are transparently redirected to `nagendra.yadav@gmail.com` with the intended recipient captured in the subject/body. To go fully live, verify a domain at resend.com/domains and clear this env var.
+- **AI email drafting** (`POST /api/emails/draft`) — LLM-powered subject + concern-summary rendered into the exact official template you supplied. `role=customer` signs as the policyholder; `role=office` signs the logged-in office as **Chief {Claims|Grievance|Policy|Customer-Care} Officer** based on the ticket's service type. Copy or open-in-mail from the modal.
+- **Inbox reset** — `POST /api/admin/wipe` (admin-only) purges tickets/notifications/audits/OTPs. Used to clear the imaginary spam messages you saw.
+- **Voice recorder fixes** — clearer error messages, audio-file-upload fallback, iframe detection with an "Open in a new tab" button (the Emergent preview iframe blocks getUserMedia — opening the standalone URL always works).

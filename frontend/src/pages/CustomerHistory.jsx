@@ -4,6 +4,7 @@ import Shell from "@/components/Shell";
 import { api } from "@/lib/api";
 import { Badge } from "@/components/ui/badge";
 import { Volume2 } from "lucide-react";
+import AIEmail from "@/components/AIEmail";
 
 const DARK = "#080C14", PANEL = "#0F1626", BORDER = "#1E293B", GOLD = "#FBBF24", BLUE = "#3B82F6", MUTED = "#94A3B8";
 
@@ -75,6 +76,9 @@ export default function CustomerHistory() {
                     <div className="mono text-[10px] uppercase tracking-[0.24em] mb-2" style={{ color: MUTED }}>Your voice note</div>
                     <div className="aesthetic-serif text-lg leading-snug" style={{ color: "#F1F5F9" }}>{t.parsed_text}</div>
                     {t.audio_base64 && <audio controls src={t.audio_base64} className="mt-2 h-8 w-full" />}
+                    <div className="mt-3">
+                      <AIEmail ticketId={t.id} role="customer" />
+                    </div>
                   </div>
                   <div>
                     <div className="mono text-[10px] uppercase tracking-[0.24em] mb-2" style={{ color: MUTED }}>Office response</div>

@@ -72,3 +72,40 @@ async def classify_intent(text: str) -> dict:
         }
     except Exception:
         return {"service_type": "service", "priority": "normal", "sentiment": "neutral"}
+
+
+async def summarize_concern(text: str, max_words: int = 60) -> str:
+    """Turn a raw customer transcript into a crisp subject-worthy concern summary."""
+    if not text.strip():
+        return ""
+    system = (
+        f"Rewrite the customer's concern as a clear, formal, single-paragraph summary of at most {max_words} words. "
+        "Preserve all specific facts (dates, amounts, names). No greetings, no signatures — just the summary."
+    )
+    out = await _chat_send(system, text)
+    return out or text
+
+
+async def generate_subject(text: str) -> str:
+    """Produce a short, business-appropriate email subject from a customer concern."""
+    if not text.strip():
+        return "Customer request"
+    system = (
+        "Write a concise, professional email subject line (max 12 words) for the customer concern below. "
+        "No quotes, no prefixes like 'Subject:'. Just the subject line."
+    )
+    out = await _chat_send(system, text)
+    return (out or "Customer request").strip().strip('"').strip("'")
+
+
+async def draft_office_solution(concern: str, service_type: str) -> str:
+    """Draft a first-cut solution the officer can edit before sending."""
+    if not concern.strip():
+        return ""
+    system = (
+        f"You are a senior officer at New India Assurance handling {service_type}. Draft a helpful, factual "
+        "reply outlining the steps you will take for the customer, in 120-180 words. Do not include greetings or "
+        "signatures. Do not promise unrealistic timelines. Use plain English."
+    )
+    out = await _chat_send(system, concern)
+    return out or ""

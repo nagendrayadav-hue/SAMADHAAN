@@ -11,6 +11,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { toast } from "sonner";
 import { LogOut, Volume2, AlertTriangle, Clock, CheckCircle2, Bell, RefreshCcw, Download, Search, BarChart3, Mail, Inbox as InboxIcon, MailOpen, ChevronRight } from "lucide-react";
+import AIEmail from "@/components/AIEmail";
 
 const DARK = "#080C14", PANEL = "#0F1626", BORDER = "#1E293B", GOLD = "#FBBF24", BLUE = "#3B82F6", GREEN = "#10B981", MUTED = "#94A3B8", LIGHT = "#F1F5F9";
 
@@ -505,6 +506,9 @@ export default function OfficeDashboard() {
                 <div className="rounded-lg p-4 aesthetic-serif text-lg leading-snug"
                      style={{ background: DARK, border: `1px solid ${BORDER}` }}>{active.parsed_text}</div>
                 {active.audio_base64 && <audio controls src={active.audio_base64} className="mt-2 w-full h-9" />}
+                <div className="mt-3">
+                  <AIEmail ticketId={active.id} role="office" customerEmail="" />
+                </div>
               </div>
 
               <div>
