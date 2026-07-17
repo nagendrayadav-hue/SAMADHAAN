@@ -1,0 +1,103 @@
+@import url('https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=DM+Sans:opsz,wght@9..40,300;9..40,400;9..40,500;9..40,600;9..40,700&family=JetBrains+Mono:wght@400;500&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+body {
+    margin: 0;
+    font-family: 'DM Sans', ui-sans-serif, system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    background: #f6f1e8;
+    color: #14213d;
+}
+
+code, .mono {
+    font-family: 'JetBrains Mono', ui-monospace, monospace;
+}
+
+.font-serif { font-family: 'Instrument Serif', ui-serif, serif; letter-spacing: -0.01em; }
+
+@layer base {
+    :root {
+        --background: 42 46% 94%;
+        --foreground: 224 47% 16%;
+        --card: 42 30% 98%;
+        --card-foreground: 224 47% 16%;
+        --popover: 42 30% 98%;
+        --popover-foreground: 224 47% 16%;
+        --primary: 224 47% 16%;
+        --primary-foreground: 42 46% 96%;
+        --secondary: 42 30% 88%;
+        --secondary-foreground: 224 47% 16%;
+        --muted: 42 25% 90%;
+        --muted-foreground: 224 20% 40%;
+        --accent: 24 88% 55%;
+        --accent-foreground: 42 46% 96%;
+        --destructive: 0 72% 51%;
+        --destructive-foreground: 42 46% 96%;
+        --border: 224 15% 82%;
+        --input: 224 15% 82%;
+        --ring: 24 88% 55%;
+        --radius: 0.5rem;
+    }
+}
+
+@layer base {
+    * { @apply border-border; }
+    body { @apply bg-background text-foreground; }
+    ::selection { background: #fb923c; color: #14213d; }
+}
+
+/* Grain texture overlay */
+.grain::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    z-index: 1;
+    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='120' height='120'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0.06 0'/></filter><rect width='120' height='120' filter='url(%23n)'/></svg>");
+    opacity: 0.7;
+    mix-blend-mode: multiply;
+}
+
+.tape {
+    background: repeating-linear-gradient(
+        45deg,
+        #14213d,
+        #14213d 8px,
+        #fb923c 8px,
+        #fb923c 16px
+    );
+}
+
+.rec-pulse {
+    animation: pulse-red 1.2s ease-in-out infinite;
+}
+@keyframes pulse-red {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.6); }
+    50% { box-shadow: 0 0 0 12px rgba(239, 68, 68, 0); }
+}
+
+.card-lift {
+    transition: transform 240ms cubic-bezier(.2,.9,.3,1), box-shadow 240ms;
+}
+.card-lift:hover {
+    transform: translateY(-4px);
+    box-shadow: 0 20px 40px -20px rgba(20, 33, 61, 0.25);
+}
+
+.stagger-in > * {
+    opacity: 0;
+    transform: translateY(12px);
+    animation: fade-up 520ms cubic-bezier(.2,.9,.3,1) forwards;
+}
+.stagger-in > *:nth-child(1) { animation-delay: 60ms; }
+.stagger-in > *:nth-child(2) { animation-delay: 140ms; }
+.stagger-in > *:nth-child(3) { animation-delay: 220ms; }
+.stagger-in > *:nth-child(4) { animation-delay: 300ms; }
+.stagger-in > *:nth-child(5) { animation-delay: 380ms; }
+@keyframes fade-up {
+    to { opacity: 1; transform: translateY(0); }
+}
