@@ -1,38 +1,53 @@
 import React from "react";
-import { Link, useNavigate } from "react-router-dom";
-import { ShieldCheck, ArrowLeft } from "lucide-react";
+import { Link, useNavigate, useLocation } from "react-router-dom";
+import { ArrowLeft } from "lucide-react";
 
-export default function Shell({ children, back = false, badge = "समाधान · Samaadhaan" }) {
-  const navigate = useNavigate();
+export default function Shell({ children, back = false, right = null }) {
+  const nav = useNavigate();
+  const loc = useLocation();
   return (
-    <div className="grain min-h-screen relative">
-      <div className="tape h-2 w-full" />
-      <header className="relative z-10 max-w-6xl mx-auto px-6 pt-6 pb-4 flex items-center justify-between">
-        <Link to="/" className="flex items-center gap-3 group" data-testid="logo-link">
-          <div className="w-10 h-10 rounded-md bg-[#14213d] text-[#f6f1e8] flex items-center justify-center">
-            <ShieldCheck size={20} />
+    <div className="min-h-screen flex flex-col" style={{ background: "#080C14", color: "#F1F5F9" }}>
+      <header className="sticky top-0 z-50" style={{ background: "rgba(15,22,38,0.9)", backdropFilter: "blur(12px)", borderBottom: "1px solid #1E293B" }}>
+        <div className="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
+          <Link to="/" className="flex items-center gap-3" data-testid="logo-link">
+            <span className="mono font-bold text-lg px-2.5 py-1 rounded-md"
+                  style={{ background: "#FBBF24", color: "#080C14" }}>S</span>
+            <div className="leading-tight">
+              <div className="font-semibold text-[15px] tracking-tight">Samadhaan Engine</div>
+              <div className="text-[10px] uppercase tracking-[0.22em] mono" style={{ color: "#94A3B8" }}>
+                Command Center · Gateway
+              </div>
+            </div>
+          </Link>
+
+          <div className="flex items-center gap-3">
+            {right}
+            <div className="hidden md:flex items-center gap-2 text-[10px] uppercase mono tracking-[0.22em]" style={{ color: "#94A3B8" }}>
+              <span className="w-1.5 h-1.5 rounded-full dot-pulse" style={{ background: "#10B981" }} />
+              live · {loc.pathname}
+            </div>
           </div>
-          <div className="leading-tight">
-            <div className="font-serif text-2xl">Samaadhaan</div>
-            <div className="text-[11px] uppercase tracking-[0.18em] text-[#14213d]/60">New India Assurance · Grievance Portal</div>
-          </div>
-        </Link>
-        <div className="text-xs mono uppercase tracking-widest text-[#14213d]/60 hidden sm:block">{badge}</div>
+        </div>
       </header>
+
       {back && (
-        <div className="relative z-10 max-w-6xl mx-auto px-6">
-          <button
-            onClick={() => navigate(-1)}
-            className="inline-flex items-center gap-1 text-sm text-[#14213d]/70 hover:text-[#14213d] transition"
-            data-testid="back-btn"
-          >
-            <ArrowLeft size={14} /> back
+        <div className="max-w-7xl mx-auto px-6 pt-4">
+          <button onClick={() => nav(-1)}
+                  className="inline-flex items-center gap-1 text-xs uppercase tracking-widest mono transition"
+                  style={{ color: "#94A3B8" }}
+                  data-testid="back-btn">
+            <ArrowLeft size={12} /> Return to previous node
           </button>
         </div>
       )}
-      <main className="relative z-10 max-w-6xl mx-auto px-6 pb-24">{children}</main>
-      <footer className="relative z-10 max-w-6xl mx-auto px-6 pb-8 text-[11px] uppercase tracking-widest text-[#14213d]/50 mono">
-        Samaadhaan v1 · Escalations route to ravikant.vishl@newindia.co.in · Higher authority: Manjula Vishal
+
+      <main className="flex-1 max-w-7xl mx-auto w-full px-6 pb-20">{children}</main>
+
+      <footer style={{ borderTop: "1px solid #1E293B", background: "rgba(15,22,38,0.3)" }}>
+        <div className="max-w-7xl mx-auto px-6 py-4 text-center text-[10px] uppercase mono tracking-[0.28em]"
+             style={{ color: "#475569" }}>
+          Samadhaan · Strategic Redressal &amp; Dispatch Routing · New India Assurance · Escalations → manjula.vishal@newindia.co.in
+        </div>
       </footer>
     </div>
   );

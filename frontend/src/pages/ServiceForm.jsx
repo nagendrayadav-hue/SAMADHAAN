@@ -2,16 +2,17 @@ import React, { useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import Shell from "@/components/Shell";
 import { Button } from "@/components/ui/button";
-import { Card } from "@/components/ui/card";
 import AudioCapture from "@/components/AudioCapture";
 import { api } from "@/lib/api";
 import { toast } from "sonner";
-import { FileText, Shield, MessageSquareWarning, HeartHandshake, Send } from "lucide-react";
+import { FileText, Shield, MessageSquareWarning, HeartHandshake, Send, Radio } from "lucide-react";
 
-const SERVICES_EXISTING = [
-  { key: "policy", label: "Policy", icon: Shield, hint: "Endorsement, premium, renewal, cover" },
-  { key: "claims", label: "Claims", icon: FileText, hint: "New claim, document, status" },
-  { key: "grievance", label: "Grievance", icon: MessageSquareWarning, hint: "Complaint against office / dissatisfaction" },
+const DARK = "#080C14", PANEL = "#0F1626", BORDER = "#1E293B", GOLD = "#FBBF24", BLUE = "#3B82F6", MUTED = "#94A3B8";
+
+const SERVICES = [
+  { key: "policy", label: "Policy", icon: Shield, hint: "Endorsement · premium · renewal" },
+  { key: "claims", label: "Claims", icon: FileText, hint: "New claim · document · status" },
+  { key: "grievance", label: "Grievance", icon: MessageSquareWarning, hint: "Complaint · dissatisfaction" },
 ];
 
 export default function ServiceForm() {
@@ -19,7 +20,7 @@ export default function ServiceForm() {
   const [sp] = useSearchParams();
   const mobile = sp.get("mobile");
   const policy = sp.get("policy");
-  const customerType = sp.get("type"); // new | existing
+  const customerType = sp.get("type");
 
   const [service, setService] = useState(customerType === "new" ? "service" : null);
   const [text, setText] = useState("");
@@ -28,7 +29,7 @@ export default function ServiceForm() {
   const [busy, setBusy] = useState(false);
 
   const submit = async () => {
-    if (!text.trim() && !audio) return toast.error("Please record or type your issue.");
+    if (!text.trim() && !audio) return toast.error("Record a voice note or type your issue.");
     setBusy(true);
     try {
       const r = await api.post("/tickets", {
@@ -36,7 +37,7 @@ export default function ServiceForm() {
         service_type: service, audio_base64: audio, parsed_text: text, language,
         auto_classify: true,
       });
-      toast.success(`Ticket ${r.data.ticket_id} created. SMS sent.`);
+      toast.success(`Ticket ${r.data.ticket_id} dispatched. SMS sent.`);
       nav(`/customer/history?mobile=${mobile}&new=${r.data.ticket_id}`);
     } catch (e) { toast.error(e.response?.data?.detail || "Failed"); }
     setBusy(false);
@@ -44,33 +45,42 @@ export default function ServiceForm() {
 
   return (
     <Shell back>
-      <div className="mt-8 grid md:grid-cols-12 gap-8">
-        <div className="md:col-span-5">
-          <div className="text-xs mono uppercase tracking-[0.24em] text-[#fb923c] mb-3">
-            Step 02 · {customerType === "new" ? "Tell us what you need" : "Choose a category"}
+      <div className="mt-10 grid lg:grid-cols-12 gap-8">
+        <div className="lg:col-span-5">
+          <div className="mono text-[10px] uppercase tracking-[0.28em]" style={{ color: GOLD }}>
+            Node 02 · {customerType === "new" ? "Care intake" : "Category routing"}
           </div>
-          <h2 className="font-serif text-5xl leading-[0.95]">Raise your concern.</h2>
-          <p className="mt-4 text-[#14213d]/70 max-w-sm">Speak naturally in any Indian language. We transcribe on-device and forward the audio + text to the correct desk.</p>
+          <h2 className="aesthetic-serif text-5xl leading-[0.98] mt-4">Compose your envelope.</h2>
+          <p className="mt-5 max-w-sm text-sm leading-relaxed" style={{ color: MUTED }}>
+            Speak naturally in any Indian language. The AI transcribes on-device and dispatches the audio + text to the correct desk.
+          </p>
 
-          <div className="mt-8 text-sm mono uppercase tracking-widest text-[#14213d]/60">
-            <div>Mobile · <span className="text-[#14213d]">{mobile}</span></div>
-            {policy && <div>Policy · <span className="text-[#14213d]">{policy}</span></div>}
-            <div>Customer · <span className="text-[#14213d]">{customerType}</span></div>
+          <div className="mt-6 p-4 rounded-xl mono text-xs" style={{ background: PANEL, border: `1px solid ${BORDER}` }}>
+            <div className="flex items-center justify-between"><span style={{ color: MUTED }}>MOBILE</span><span>{mobile}</span></div>
+            {policy && <div className="flex items-center justify-between mt-1"><span style={{ color: MUTED }}>POLICY</span><span>{policy}</span></div>}
+            <div className="flex items-center justify-between mt-1"><span style={{ color: MUTED }}>TYPE</span><span className="uppercase">{customerType}</span></div>
+            <div className="flex items-center justify-between mt-1"><span style={{ color: MUTED }}>TICKET</span>
+              <span>{mobile}_{policy || "TKT####"}</span></div>
           </div>
 
           {customerType === "existing" && (
-            <div className="mt-8 grid gap-3">
-              {SERVICES_EXISTING.map(({ key, label, icon: Icon, hint }) => (
+            <div className="mt-6 grid gap-3">
+              {SERVICES.map(({ key, label, icon: Icon, hint }) => (
                 <button key={key} onClick={() => setService(key)}
-                  className={`text-left card-lift bg-[#fdfaf3] border rounded-md p-4 flex gap-3 items-start ${service === key ? "border-[#fb923c] ring-2 ring-[#fb923c]/30" : "border-[#14213d]/15"}`}
+                  className="text-left card-lift rounded-xl p-4 flex gap-3 items-start"
+                  style={{
+                    background: PANEL,
+                    border: `1px solid ${service === key ? GOLD : BORDER}`,
+                  }}
                   data-testid={`service-${key}`}
                 >
-                  <div className={`w-10 h-10 rounded-md flex items-center justify-center ${service === key ? "bg-[#fb923c] text-[#14213d]" : "bg-[#14213d] text-[#f6f1e8]"}`}>
+                  <div className="w-10 h-10 rounded-xl flex items-center justify-center"
+                       style={{ background: DARK, border: `1px solid ${BORDER}`, color: service === key ? GOLD : BLUE }}>
                     <Icon size={16} />
                   </div>
                   <div>
-                    <div className="font-serif text-2xl leading-none">{label}</div>
-                    <div className="text-xs text-[#14213d]/60 mt-1">{hint}</div>
+                    <div className="aesthetic-serif text-2xl leading-none">{label}</div>
+                    <div className="text-xs mt-1" style={{ color: MUTED }}>{hint}</div>
                   </div>
                 </button>
               ))}
@@ -78,41 +88,53 @@ export default function ServiceForm() {
           )}
 
           {customerType === "new" && (
-            <div className="mt-8 bg-[#14213d] text-[#f6f1e8] rounded-md p-5 flex gap-3">
-              <HeartHandshake className="shrink-0 mt-1" size={20} />
+            <div className="mt-6 rounded-xl p-5 flex gap-3" style={{ background: PANEL, border: `1px solid ${BORDER}` }}>
+              <HeartHandshake className="shrink-0 mt-1" size={20} style={{ color: GOLD }} />
               <div>
-                <div className="font-serif text-2xl">Customer Care</div>
-                <div className="text-sm mt-1 text-[#f6f1e8]/80">Nearest office · product help · general query. Someone from New India will call you back.</div>
+                <div className="aesthetic-serif text-2xl">Customer Care</div>
+                <div className="text-xs mt-1" style={{ color: MUTED }}>
+                  Nearest office · product help · general query. Someone from New India will call you back.
+                </div>
               </div>
             </div>
           )}
         </div>
 
-        <div className="md:col-span-7">
-          <Card className="bg-[#fdfaf3] border-[#14213d]/15 p-6">
+        <div className="lg:col-span-7">
+          <div className="rounded-2xl p-6" style={{ background: PANEL, border: `1px solid ${BORDER}` }}>
+            <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center gap-2 mono text-[10px] uppercase tracking-[0.28em]" style={{ color: MUTED }}>
+                <Radio size={11} style={{ color: GOLD }} />
+                Recording for · <span style={{ color: "#F1F5F9" }}>{customerType === "new" ? "Customer Care" : (service || "…")}</span>
+              </div>
+              <div className="mono text-[10px] uppercase tracking-[0.28em]" style={{ color: MUTED }}>2 min cap</div>
+            </div>
+
             {(customerType === "new" || service) ? (
               <div className="space-y-4">
-                <div className="text-xs mono uppercase tracking-widest text-[#14213d]/60">
-                  Recording for: <span className="text-[#14213d]">{customerType === "new" ? "Customer Care" : service}</span>
-                </div>
                 <AudioCapture
                   value={text} onChange={setText}
                   audioBase64={audio} onAudioChange={setAudio}
                   language={language} onLanguageChange={setLanguage}
                 />
-                <div className="pt-4 border-t border-[#14213d]/10 flex items-center justify-between">
-                  <div className="text-xs text-[#14213d]/60">
-                    Ticket ID will be <span className="mono text-[#14213d]">{mobile}_{policy || "TKT####"}</span>
+                <div className="pt-4 flex items-center justify-between" style={{ borderTop: `1px solid ${BORDER}` }}>
+                  <div className="mono text-[11px]" style={{ color: MUTED }}>
+                    Dispatch → {customerType === "new" ? "ravikant.vishl@newindia.co.in" : `office ${policy ? policy.slice(0, 6) : "…"} desk`}
                   </div>
-                  <Button onClick={submit} disabled={busy} className="bg-[#fb923c] hover:bg-[#f97316] text-[#14213d]" data-testid="submit-ticket-btn">
-                    <Send className="mr-2" size={14} /> Submit &amp; notify office
+                  <Button onClick={submit} disabled={busy}
+                    className="uppercase mono tracking-widest font-bold"
+                    style={{ background: GOLD, color: DARK }}
+                    data-testid="submit-ticket-btn">
+                    <Send className="mr-2" size={14} /> Dispatch envelope
                   </Button>
                 </div>
               </div>
             ) : (
-              <div className="text-center text-[#14213d]/60 py-12">Pick a category on the left to begin.</div>
+              <div className="text-center py-16 mono text-xs uppercase tracking-widest" style={{ color: MUTED }}>
+                Select a category on the left to begin recording.
+              </div>
             )}
-          </Card>
+          </div>
         </div>
       </div>
     </Shell>

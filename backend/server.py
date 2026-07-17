@@ -351,6 +351,37 @@ async def customer_history(mobile: str):
     return await db.tickets.find({"mobile": mobile}, {"_id": 0}).sort("created_at", -1).to_list(200)
 
 
+# ---------- Internal INBOX ----------
+# Returns the emails routed to the currently-logged-in office as an inbox.
+# Admin sees every email; office sees only emails to any of their mail addresses
+# (office.email, claims_email, grievance_email).
+@api.get("/inbox")
+async def inbox(payload: dict = Depends(current_office), limit: int = Query(100, le=500)):
+    query: dict[str, Any] = {"type": "email"}
+    if payload.get("role") != "admin":
+        off = await db.offices.find_one({"code": payload["sub"]}, {"_id": 0})
+        if off:
+            query["to"] = {"$in": [off["email"], off["claims_email"], off["grievance_email"]]}
+        else:
+            return []
+    mails = await db.notifications.find(query, {"_id": 0}).sort("created_at", -1).to_list(limit)
+    # Enrich with ticket data
+    ticket_ids = [m.get("ticket_id") for m in mails if m.get("ticket_id")]
+    tmap: dict[str, Any] = {}
+    if ticket_ids:
+        async for t in db.tickets.find({"ticket_id": {"$in": ticket_ids}}, {"_id": 0}):
+            tmap[t["ticket_id"]] = t
+    for m in mails:
+        m["ticket"] = tmap.get(m.get("ticket_id"))
+    return mails
+
+
+@api.post("/inbox/{notif_id}/mark-read")
+async def mark_read(notif_id: str, payload: dict = Depends(current_office)):
+    await db.notifications.update_one({"id": notif_id}, {"$set": {"read_at": now_iso(), "read_by": payload["sub"]}})
+    return {"status": "read"}
+
+
 # NOTE: literal route MUST be declared before "/tickets/{ticket_pk}" to avoid shadowing.
 @api.get("/tickets/export.csv")
 async def export_csv(payload: dict = Depends(current_office)):

@@ -5,11 +5,13 @@ import { Button } from "@/components/ui/button";
 import { api } from "@/lib/api";
 import { toast } from "sonner";
 import { useNavigate } from "react-router-dom";
-import { Sparkles, KeyRound, ArrowRight } from "lucide-react";
+import { Sparkles, KeyRound, ArrowRight, ShieldCheck } from "lucide-react";
+
+const DARK = "#080C14", PANEL = "#0F1626", BORDER = "#1E293B", GOLD = "#FBBF24", BLUE = "#3B82F6", MUTED = "#94A3B8";
 
 export default function CustomerEntry() {
   const nav = useNavigate();
-  const [tab, setTab] = useState("existing"); // existing | new
+  const [tab, setTab] = useState("existing");
   const [mobile, setMobile] = useState("");
   const [policy, setPolicy] = useState("");
   const [otp, setOtp] = useState("");
@@ -46,70 +48,100 @@ export default function CustomerEntry() {
 
   return (
     <Shell back>
-      <div className="grid md:grid-cols-12 gap-10 mt-8">
-        <div className="md:col-span-5">
-          <div className="text-xs mono uppercase tracking-[0.24em] text-[#fb923c] mb-3">Step 01 · Identify</div>
-          <h2 className="font-serif text-5xl leading-[0.95]">Who's calling?</h2>
-          <p className="mt-4 text-[#14213d]/70 max-w-sm">Existing customers verify their policy. New callers only need a mobile number — we'll route you to the customer care center.</p>
+      <div className="grid lg:grid-cols-12 gap-10 mt-10">
+        <div className="lg:col-span-5">
+          <div className="mono text-[10px] uppercase tracking-[0.28em]" style={{ color: GOLD }}>Node 01 · Customer Verification</div>
+          <h2 className="aesthetic-serif text-5xl leading-[0.98] mt-4">Identity handshake.</h2>
+          <p className="mt-5 max-w-sm text-sm leading-relaxed" style={{ color: MUTED }}>
+            Existing customers verify policy. New callers only need a mobile number — we forward you to the customer care center at ravikant.vishl@newindia.co.in.
+          </p>
 
-          <div className="mt-8 flex gap-2 border border-[#14213d]/15 rounded-md p-1 bg-[#fdfaf3] w-fit">
-            {[["existing", "Existing"], ["new", "New"]].map(([k, l]) => (
-              <button
-                key={k}
-                onClick={() => setTab(k)}
-                className={`px-4 py-2 text-sm rounded ${tab === k ? "bg-[#14213d] text-[#f6f1e8]" : "text-[#14213d]/70"}`}
+          <div className="mt-8 inline-flex gap-1 rounded-xl p-1" style={{ background: PANEL, border: `1px solid ${BORDER}` }}>
+            {[["existing", "Existing"], ["new", "New Caller"]].map(([k, l]) => (
+              <button key={k} onClick={() => setTab(k)}
+                className="px-4 py-2 text-xs uppercase mono tracking-widest rounded-lg transition"
+                style={tab === k
+                  ? { background: GOLD, color: DARK }
+                  : { color: MUTED }}
                 data-testid={`tab-${k}`}
               >{l}</button>
             ))}
           </div>
+
+          <button onClick={() => nav(`/customer/history?mobile=${mobile}`)} disabled={mobile.length !== 10}
+            className="mt-6 text-xs uppercase mono tracking-widest inline-flex items-center gap-1 disabled:opacity-30"
+            style={{ color: BLUE }} data-testid="view-history-btn">
+            View my session logs →
+          </button>
         </div>
 
-        <div className="md:col-span-7">
-          <div className="bg-[#fdfaf3] border border-[#14213d]/15 rounded-xl p-8">
+        <div className="lg:col-span-7">
+          <div className="rounded-2xl p-8" style={{ background: PANEL, border: `1px solid ${BORDER}`, boxShadow: "0 20px 60px -20px rgba(0,0,0,0.6)" }}>
+            <div className="flex items-center justify-between mb-6">
+              <div className="flex items-center gap-2">
+                <ShieldCheck size={16} style={{ color: GOLD }} />
+                <div className="mono text-[10px] uppercase tracking-[0.28em]" style={{ color: MUTED }}>Verification Envelope</div>
+              </div>
+              <div className="mono text-[10px] uppercase tracking-[0.28em]" style={{ color: MUTED }}>OTP · TTL 5 min</div>
+            </div>
+
             <div className="space-y-5">
               <label className="block">
-                <div className="text-xs mono uppercase tracking-widest text-[#14213d]/60 mb-2">Mobile number</div>
+                <div className="mono text-[10px] uppercase tracking-[0.24em] mb-2" style={{ color: MUTED }}>Mobile Number</div>
                 <Input value={mobile} onChange={(e) => setMobile(e.target.value.replace(/\D/g, "").slice(0, 10))}
-                  placeholder="10-digit mobile" data-testid="mobile-input" className="text-lg" />
+                  placeholder="10-digit mobile"
+                  className="mono text-lg h-12"
+                  style={{ background: DARK, borderColor: BORDER }}
+                  data-testid="mobile-input" />
               </label>
 
               {tab === "existing" && (
                 <label className="block">
-                  <div className="text-xs mono uppercase tracking-widest text-[#14213d]/60 mb-2">Policy number (20 digits)</div>
+                  <div className="mono text-[10px] uppercase tracking-[0.24em] mb-2" style={{ color: MUTED }}>Policy Number · 20 digits</div>
                   <Input value={policy} onChange={(e) => setPolicy(e.target.value.replace(/\D/g, "").slice(0, 20))}
-                    placeholder="20-digit policy no" data-testid="policy-input" className="mono" />
-                  <div className="text-xs mt-1 text-[#14213d]/50">Try: 67010023456789012001 (Mumbai) or 94000012345678901001 (Delhi)</div>
+                    placeholder="20-digit policy no"
+                    className="mono h-12"
+                    style={{ background: DARK, borderColor: BORDER }}
+                    data-testid="policy-input" />
+                  <div className="text-[11px] mt-2 mono" style={{ color: MUTED }}>
+                    Demo · 67010023456789012001 (Mumbai) · 94000012345678901001 (Delhi)
+                  </div>
                 </label>
               )}
 
               {!otpSent ? (
-                <Button onClick={sendOtp} disabled={busy} className="bg-[#14213d] hover:bg-[#14213d]/90 text-[#f6f1e8]" data-testid="send-otp-btn">
-                  <KeyRound className="mr-2" size={16} /> Send OTP
+                <Button onClick={sendOtp} disabled={busy}
+                  className="w-full h-12 uppercase mono tracking-widest font-bold"
+                  style={{ background: GOLD, color: DARK }}
+                  data-testid="send-otp-btn">
+                  <KeyRound className="mr-2" size={14} /> Dispatch OTP
                 </Button>
               ) : (
                 <>
                   <label className="block">
-                    <div className="text-xs mono uppercase tracking-widest text-[#14213d]/60 mb-2 flex items-center gap-2">
-                      OTP {demoOtp && <span className="text-[#fb923c]">· demo: {demoOtp}</span>}
+                    <div className="mono text-[10px] uppercase tracking-[0.24em] mb-2 flex items-center gap-2" style={{ color: MUTED }}>
+                      OTP {demoOtp && <span style={{ color: GOLD }}>· demo: {demoOtp}</span>}
                     </div>
                     <Input value={otp} onChange={(e) => setOtp(e.target.value.replace(/\D/g, "").slice(0, 6))}
-                      placeholder="6-digit OTP" data-testid="otp-input" className="mono text-lg tracking-widest" />
+                      placeholder="6-digit OTP"
+                      className="mono h-12 text-lg tracking-[0.4em]"
+                      style={{ background: DARK, borderColor: BORDER }}
+                      data-testid="otp-input" />
                   </label>
-                  <Button onClick={verify} disabled={busy} className="bg-[#fb923c] hover:bg-[#f97316] text-[#14213d]" data-testid="verify-btn">
-                    Verify &amp; continue <ArrowRight className="ml-2" size={16} />
+                  <Button onClick={verify} disabled={busy}
+                    className="w-full h-12 uppercase mono tracking-widest font-bold"
+                    style={{ background: GOLD, color: DARK }}
+                    data-testid="verify-btn">
+                    Verify &amp; Continue <ArrowRight className="ml-2" size={14} />
                   </Button>
                 </>
               )}
 
-              <div className="pt-4 border-t border-[#14213d]/10 text-xs text-[#14213d]/60 flex items-center gap-2">
-                <Sparkles size={12} className="text-[#fb923c]" /> Your OTP is generated fresh per request. Nothing is stored beyond this session.
+              <div className="pt-4 flex items-center gap-2 text-[11px]" style={{ borderTop: `1px solid ${BORDER}`, color: MUTED }}>
+                <Sparkles size={11} style={{ color: GOLD }} /> OTP is generated fresh per request · 3-attempt lockout.
               </div>
             </div>
           </div>
-          <button onClick={() => nav(`/customer/history?mobile=${mobile}`)} disabled={mobile.length !== 10}
-            className="mt-4 text-sm text-[#14213d]/60 hover:text-[#14213d] disabled:opacity-30 inline-flex items-center gap-1" data-testid="view-history-btn">
-            View my past tickets →
-          </button>
         </div>
       </div>
     </Shell>

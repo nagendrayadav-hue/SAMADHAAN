@@ -56,9 +56,11 @@ def parse_iso(s: str) -> datetime:
 
 
 # ---------- JWT ----------
-JWT_SECRET = os.environ.get("JWT_SECRET", "dev-secret")
 JWT_ALG = "HS256"
 JWT_TTL_HOURS = 12
+
+def _jwt_secret() -> str:
+    return os.environ.get("JWT_SECRET", "dev-secret-change-me-in-production-please-32b")
 
 def issue_office_token(code: str, name: str) -> str:
     payload = {
@@ -68,11 +70,11 @@ def issue_office_token(code: str, name: str) -> str:
         "exp": now_utc() + timedelta(hours=JWT_TTL_HOURS),
         "iat": now_utc(),
     }
-    return jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALG)
+    return jwt.encode(payload, _jwt_secret(), algorithm=JWT_ALG)
 
 def decode_token(token: str) -> Optional[dict]:
     try:
-        return jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALG])
+        return jwt.decode(token, _jwt_secret(), algorithms=[JWT_ALG])
     except jwt.PyJWTError:
         return None
 

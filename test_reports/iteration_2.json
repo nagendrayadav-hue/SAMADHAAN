@@ -1,0 +1,49 @@
+{
+  "summary": "Executed comprehensive pytest suite (36 tests) against Samaadhaan API v2 covering health, OTP, policy, office auth, ticket CRUD + routing/scoping, LLM translation, LLM classification, resolve, aging + auto-escalation, manual escalate-auth, analytics, search/pagination, CSV export, audit RBAC, public history, and the new /api/inbox + /api/inbox/{id}/mark-read internal-inbox flow. All 36 tests PASSED against the live public URL. LLM (real Hindi translation via Emergent LLM key) and auto-classify (urgent priority) both verified working end-to-end.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "/api/tickets (create)", "issue": "POST /api/tickets is unauthenticated and can create tickets on any policy_no by anyone. Consider tying to a verified-OTP session or origin check to prevent spam."},
+      {"endpoint": "/api/auth/office/login", "issue": "Office passwords stored + compared in PLAINTEXT (see seed_data). Use bcrypt hashes before any production use."},
+      {"endpoint": "/api/tickets/{id}/simulate-aging", "issue": "Test-only endpoint reachable in prod-shaped API with just office-auth; consider gating behind admin-only or a DEBUG flag."},
+      {"endpoint": "/api/tickets/{id}/escalate", "issue": "This route has NO auth dependency and takes an optional payload=None — anyone hitting POST /api/tickets/{id}/escalate directly can escalate any ticket. The /escalate-auth variant is authenticated, but the raw /escalate is public. Recommend removing the public route or adding Depends(current_office)."},
+      {"endpoint": "/api/inbox", "issue": "Endpoint returns embedded 'audio_base64' inside the 'ticket' object which can be large. Consider stripping audio_base64 from the ticket join to keep responses light."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/backend_test.py",
+    "/app/test_reports/pytest/pytest_results.xml"
+  ],
+  "action_items": [
+    "Add auth dependency to POST /api/tickets/{id}/escalate (currently unauthenticated) OR remove it and keep only /escalate-auth.",
+    "Hash office passwords (bcrypt/argon2) instead of plaintext equality check.",
+    "Consider protecting POST /api/tickets with an OTP-verification token so customers can't be impersonated.",
+    "Trim heavy fields (audio_base64) from the ticket enrichment on /api/inbox to reduce payload size.",
+    "Move /simulate-aging behind admin-only or a debug flag."
+  ],
+  "critical_code_review_comments": [
+    "server.py is 660 lines — approaching split threshold. Extract routers per-domain (auth, tickets, inbox, analytics, llm) into separate modules before it grows further.",
+    "POST /api/tickets/{id}/escalate lacks Depends(current_office) — auth bypass risk.",
+    "Plaintext password compare in /api/auth/office/login — production risk.",
+    "TicketCreate endpoint has no rate limiting/OTP-session binding — spoofing risk.",
+    "Analytics loops in-memory over up to 2000 tickets; fine for MVP, should move to Mongo aggregation as data grows.",
+    "LLM call has no timeout; a stalled provider will hang requests. Wrap _chat_send in asyncio.wait_for(...).",
+    "audio_base64 stored inside Ticket doc (potentially large blob in Mongo). Consider GridFS or object storage.",
+    "Notifications collection is used both as an event sink AND as a real inbox — a 'read_at' write from any authed office on any notif_id (mark-read) has no ownership check, so office 940000 could theoretically mark 670100's mail as read if it knew the id."
+  ],
+  "updated_files": [
+    "/app/backend/tests/backend_test.py"
+  ],
+  "success_rate": {"backend": "100%", "frontend": "N/A (skipped per request)"},
+  "test_credentials": "Office 670100/670100, 940000/940000, admin/admin. Seeded policies: 67010023456789012001 (9876543210), 67010023456789012002 (9123456780), 94000012345678901001 (9988776655).",
+  "seed_data_creation": "None new — used app's built-in seeded policies + offices. Tests do create additional ticket + notification rows in Mongo (not cleaned up, by design for regression traceability).",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "backend_test.py runs in parallel via pytest-xdist (2 workers) and completes in ~8s. All 36 tests are stable. LLM translation depends on live Emergent LLM key — a network blip may flake test_hindi_translation / test_auto_classify_urgent; retry once if seen. The /api/tickets/{id}/escalate route (without -auth) is intentionally NOT covered as it is an auth-bypass suspect — flagged for main agent. Notification mark-read has no ownership check — noted, not tested destructively.",
+  "rca of the issue": "N/A — no failing tests. Verified INBOX feature works end-to-end: creating a ticket for policy 67010023456789012001 immediately produces an email notification to office670100@newindia.co.in, which appears in GET /api/inbox for the 670100 office with the 'ticket' object joined, and does NOT leak to the 940000 office's inbox."
+}

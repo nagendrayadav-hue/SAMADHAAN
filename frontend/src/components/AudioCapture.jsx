@@ -87,11 +87,11 @@ export default function AudioCapture({ value, onChange, audioBase64, onAudioChan
   return (
     <div className="space-y-4">
       <div className="flex items-center gap-3 flex-wrap">
-        <div className="flex items-center gap-2 text-xs uppercase tracking-widest text-[#14213d]/60 mono">
-          <Languages size={14} /> Speak in
+        <div className="flex items-center gap-2 mono text-[10px] uppercase tracking-[0.24em]" style={{ color: "#94A3B8" }}>
+          <Languages size={12} /> Speak in
         </div>
         <Select value={language} onValueChange={onLanguageChange}>
-          <SelectTrigger className="w-56" data-testid="lang-select">
+          <SelectTrigger className="w-56 h-10" style={{ background: "#080C14", borderColor: "#1E293B" }} data-testid="lang-select">
             <SelectValue placeholder="Language" />
           </SelectTrigger>
           <SelectContent>
@@ -102,11 +102,14 @@ export default function AudioCapture({ value, onChange, audioBase64, onAudioChan
 
       <div className="flex items-center gap-3 flex-wrap">
         {!recording ? (
-          <Button onClick={start} className="bg-[#14213d] hover:bg-[#14213d]/90 text-[#f6f1e8]" data-testid="record-btn">
-            <Mic className="mr-2" size={16} /> Record voice note (2 min)
+          <Button onClick={start}
+            className="uppercase mono tracking-widest font-bold"
+            style={{ background: "#FBBF24", color: "#080C14" }}
+            data-testid="record-btn">
+            <Mic className="mr-2" size={14} /> Record voice · 2 min
           </Button>
         ) : (
-          <Button onClick={stop} className="bg-red-600 hover:bg-red-700 text-white rec-pulse" data-testid="stop-btn">
+          <Button onClick={stop} className="bg-red-600 hover:bg-red-700 text-white rec-pulse uppercase mono tracking-widest" data-testid="stop-btn">
             <Square className="mr-2" size={14} /> Stop · {String(Math.floor(elapsed / 60)).padStart(2, "0")}:{String(elapsed % 60).padStart(2, "0")}
           </Button>
         )}
@@ -114,7 +117,7 @@ export default function AudioCapture({ value, onChange, audioBase64, onAudioChan
         {audioUrl && (
           <>
             <audio controls src={audioUrl} className="h-9" data-testid="audio-preview" />
-            <Button variant="ghost" onClick={clearAudio} data-testid="clear-audio-btn"><Trash2 size={14} /></Button>
+            <Button variant="ghost" onClick={clearAudio} data-testid="clear-audio-btn" style={{ color: "#94A3B8" }}><Trash2 size={14} /></Button>
           </>
         )}
       </div>
@@ -124,7 +127,7 @@ export default function AudioCapture({ value, onChange, audioBase64, onAudioChan
         onChange={(e) => { transcriptRef.current = e.target.value; onChange(e.target.value); }}
         placeholder="Your voice will be transcribed here. You can also type or edit."
         rows={5}
-        className="bg-[#fdfaf3] border-[#14213d]/20"
+        style={{ background: "#080C14", borderColor: "#1E293B", color: "#F1F5F9" }}
         data-testid="parsed-text"
       />
     </div>
