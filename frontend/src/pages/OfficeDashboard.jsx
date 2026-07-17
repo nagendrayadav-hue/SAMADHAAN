@@ -2,6 +2,7 @@ import React, { useEffect, useState, useMemo, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import Shell from "@/components/Shell";
 import { api, LANGS, SPEECH_LOCALE, API } from "@/lib/api";
+import { dashboardPrefs } from "@/lib/session";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -30,15 +31,17 @@ const priorityPill = {
 
 export default function OfficeDashboard() {
   const nav = useNavigate();
+  const savedPrefs = dashboardPrefs.get();
   const [office, setOffice] = useState(null);
   const [tickets, setTickets] = useState([]);
   const [inbox, setInbox] = useState([]);
   const [total, setTotal] = useState(0);
-  const [page, setPage] = useState(1);
-  const [q, setQ] = useState("");
-  const [statusF, setStatusF] = useState("");
-  const [serviceF, setServiceF] = useState("");
-  const [priorityF, setPriorityF] = useState("");
+  const [page, setPage] = useState(savedPrefs.page || 1);
+  const [q, setQ] = useState(savedPrefs.q || "");
+  const [statusF, setStatusF] = useState(savedPrefs.statusF || "");
+  const [serviceF, setServiceF] = useState(savedPrefs.serviceF || "");
+  const [priorityF, setPriorityF] = useState(savedPrefs.priorityF || "");
+  const [tab, setTab] = useState(savedPrefs.tab || "inbox");
   const [notifs, setNotifs] = useState([]);
   const [active, setActive] = useState(null);
   const [selectedMail, setSelectedMail] = useState(null);
@@ -48,6 +51,11 @@ export default function OfficeDashboard() {
   const [analytics, setAnalytics] = useState(null);
   const seenMailIds = useRef(new Set());
   const LIMIT = 20;
+
+  // Persist filter prefs
+  useEffect(() => {
+    dashboardPrefs.patch({ tab, q, statusF, serviceF, priorityF, page });
+  }, [tab, q, statusF, serviceF, priorityF, page]);
 
   useEffect(() => {
     const o = JSON.parse(localStorage.getItem("samaadhaan_office") || "null");
@@ -204,7 +212,7 @@ export default function OfficeDashboard() {
         </div>
       )}
 
-      <Tabs defaultValue="inbox" className="mt-10">
+      <Tabs value={tab} onValueChange={setTab} className="mt-10">
         <TabsList data-testid="tabs" className="mono text-[10px] uppercase tracking-widest"
           style={{ background: PANEL, border: `1px solid ${BORDER}` }}>
           <TabsTrigger value="inbox" data-testid="tab-inbox">

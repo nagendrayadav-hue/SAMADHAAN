@@ -16,19 +16,23 @@ def _sender() -> str:
     return os.environ.get("RESEND_FROM", "Samaadhaan <onboarding@resend.dev>")
 
 
-async def send_email(to: str, subject: str, body: str, cc: Optional[list] = None) -> dict:
+async def send_email(to: str, subject: str, body: str, cc: Optional[list] = None,
+                     bypass_override: bool = False) -> dict:
     """Send email via Resend. Returns {sent: bool, id?: str, error?: str}.
 
     If TEST_EMAIL_OVERRIDE is set, ALL emails are redirected there so the
     Resend sandbox (which restricts sending to the account owner only) still
     delivers something the user can actually see in their inbox. The original
     recipient is captured in the subject line and message header.
+
+    bypass_override=True skips the redirect entirely — used by escalation so
+    the mail goes straight to Manjula Vishal's real address.
     """
     key = _resend_key()
     if not key or not to:
         return {"sent": False, "error": "no_key_or_recipient"}
 
-    override = os.environ.get("TEST_EMAIL_OVERRIDE", "").strip()
+    override = "" if bypass_override else os.environ.get("TEST_EMAIL_OVERRIDE", "").strip()
     actual_to = override or to
     if override and override != to:
         subject = f"[FOR: {to}] {subject}"

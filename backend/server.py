@@ -643,30 +643,48 @@ async def escalate_ticket(ticket_pk: str, payload: Optional[dict] = None, _actor
         company="New India Assurance",
     )
 
-    # Auto-deliver through Resend. Record the notification with delivery status.
+    # Auto-deliver through Resend, straight to Manjula (no override).
     n = Notification(
         type="email", to=HIGHER_AUTHORITY_EMAIL,
         subject=subject, message=body, ticket_id=t["ticket_id"],
     )
     doc = n.to_mongo()
     result = await send_email(HIGHER_AUTHORITY_EMAIL, subject, body,
-                              cc=[office_mail] if office_mail else None)
+                              cc=[office_mail] if office_mail else None,
+                              bypass_override=True)
+
+    # Sandbox fallback: if Resend rejected because the domain is not verified,
+    # retry via the standard TEST_EMAIL_OVERRIDE pathway so the demo still lands
+    # in the user's inbox. The subject/body already contain the intended
+    # recipient thanks to the override wrapper.
+    fallback = False
+    if not result.get("sent"):
+        err = (result.get("error") or "").lower()
+        if "verify a domain" in err or "own email address" in err:
+            retry = await send_email(HIGHER_AUTHORITY_EMAIL, subject, body, cc=None,
+                                     bypass_override=False)
+            if retry.get("sent"):
+                result = retry
+                fallback = True
+
     doc["delivered"] = result.get("sent", False)
     doc["provider_id"] = result.get("id")
     doc["provider_error"] = result.get("error")
     doc["cc"] = [office_mail] if office_mail else []
+    doc["fallback_used"] = fallback
     await db.notifications.insert_one(doc)
 
     await audit(actor, "escalated", "ticket", t["ticket_id"],
                 {"to": HIGHER_AUTHORITY_EMAIL, "cc": office_mail, "reason": reason,
                  "age_hours": age_hours, "attempt": escalation_number,
-                 "delivered": result.get("sent", False)})
+                 "delivered": result.get("sent", False), "fallback": fallback})
     return {
         "status": "escalated",
         "delivered": result.get("sent", False),
         "email_id": result.get("id"),
         "to": HIGHER_AUTHORITY_EMAIL,
         "cc": office_mail,
+        "fallback_used": fallback,
     }
 
 

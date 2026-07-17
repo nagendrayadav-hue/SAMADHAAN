@@ -1,11 +1,12 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import Shell from "@/components/Shell";
 import { Button } from "@/components/ui/button";
 import AudioCapture from "@/components/AudioCapture";
 import { api } from "@/lib/api";
+import { ticketDraft } from "@/lib/session";
 import { toast } from "sonner";
-import { FileText, Shield, MessageSquareWarning, HeartHandshake, Send, Radio } from "lucide-react";
+import { FileText, Shield, MessageSquareWarning, HeartHandshake, Send, Radio, RotateCcw } from "lucide-react";
 
 const DARK = "#080C14", PANEL = "#0F1626", BORDER = "#1E293B", GOLD = "#FBBF24", BLUE = "#3B82F6", MUTED = "#94A3B8";
 
@@ -28,6 +29,29 @@ export default function ServiceForm() {
   const [language, setLanguage] = useState("hi");
   const [busy, setBusy] = useState(false);
 
+  // Restore draft on mount (per-mobile)
+  useEffect(() => {
+    if (!mobile) return;
+    const d = ticketDraft.get(mobile);
+    if (!d) return;
+    if (d.service) setService(d.service);
+    if (d.text) setText(d.text);
+    if (d.audio) setAudio(d.audio);
+    if (d.language) setLanguage(d.language);
+  }, [mobile]);
+
+  // Persist draft on any change
+  useEffect(() => {
+    if (!mobile) return;
+    ticketDraft.set(mobile, { service, text, audio, language });
+  }, [mobile, service, text, audio, language]);
+
+  const clearDraft = () => {
+    setText(""); setAudio(null); setService(customerType === "new" ? "service" : null); setLanguage("hi");
+    ticketDraft.clear(mobile);
+    toast("Draft cleared");
+  };
+
   const submit = async () => {
     if (!text.trim() && !audio) return toast.error("Record a voice note or type your issue.");
     setBusy(true);
@@ -38,6 +62,7 @@ export default function ServiceForm() {
         auto_classify: true,
       });
       toast.success(`Ticket ${r.data.ticket_id} dispatched. SMS sent.`);
+      ticketDraft.clear(mobile);
       nav(`/customer/history?mobile=${mobile}&new=${r.data.ticket_id}`);
     } catch (e) { toast.error(e.response?.data?.detail || "Failed"); }
     setBusy(false);
@@ -118,8 +143,17 @@ export default function ServiceForm() {
                   language={language} onLanguageChange={setLanguage}
                 />
                 <div className="pt-4 flex items-center justify-between" style={{ borderTop: `1px solid ${BORDER}` }}>
-                  <div className="mono text-[11px]" style={{ color: MUTED }}>
-                    Dispatch → {customerType === "new" ? "ravikant.vishl@newindia.co.in" : `office ${policy ? policy.slice(0, 6) : "…"} desk`}
+                  <div className="flex items-center gap-3">
+                    <div className="mono text-[11px]" style={{ color: MUTED }}>
+                      Dispatch → {customerType === "new" ? "ravikant.vishl@newindia.co.in" : `nia.${policy ? policy.slice(0, 6) : "…"}@newindia.co.in`}
+                    </div>
+                    {(text || audio) && (
+                      <button onClick={clearDraft}
+                        className="mono text-[10px] uppercase tracking-widest inline-flex items-center gap-1"
+                        style={{ color: MUTED }} data-testid="clear-draft-btn">
+                        <RotateCcw size={10} /> clear draft
+                      </button>
+                    )}
                   </div>
                   <Button onClick={submit} disabled={busy}
                     className="uppercase mono tracking-widest font-bold"

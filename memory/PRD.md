@@ -88,3 +88,8 @@ Multi-role New India Assurance customer service portal ("Samaadhaan") with:
 - **Auto-send on escalation** — clicking Escalate (or the 24h auto-escalation firing) now actually delivers the mail via Resend to `manjula.vishal@newindia.co.in` and returns `{delivered: true, email_id}` so the office sees provider confirmation instantly.
 - **Auto-send on AI-email button** — the frontend AI-email modal now has a "Send now" action. Recipient is editable inline; success shows the Resend provider id.
 - Resend sandbox fix: when `TEST_EMAIL_OVERRIDE` is active, CC recipients are dropped (Resend sandbox rejects any unverified CC address). CC is restored automatically once you verify a domain and remove the override.
+
+## Update · 2026-07-17 (v2.6)
+- **Escalation bypasses `TEST_EMAIL_OVERRIDE`** — the mail is addressed directly to `manjula.vishal@newindia.co.in`. If Resend's sandbox blocks it (domain not verified), the code transparently falls back via the override so the demo mail still lands in your inbox (`fallback_used: true` recorded on the notification). Verify a domain at resend.com/domains to make direct delivery kick in.
+- **Session memory** (`/app/frontend/src/lib/session.js`) — customer's mobile + policy + OTP-verified state persist across refresh; ticket draft (text + audio blob + language + category) is auto-saved per-mobile so refreshing the app doesn't wipe an in-progress voice recording; office dashboard remembers the active tab + filters + page. All backed by `localStorage`.
+- Verified end-to-end: manual Escalate returns `{delivered: true, email_id, fallback_used}` with Resend provider id.
