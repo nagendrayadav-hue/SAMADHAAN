@@ -72,3 +72,8 @@ Multi-role New India Assurance customer service portal ("Samaadhaan") with:
 - **AI email drafting** (`POST /api/emails/draft`) — LLM-powered subject + concern-summary rendered into the exact official template you supplied. `role=customer` signs as the policyholder; `role=office` signs the logged-in office as **Chief {Claims|Grievance|Policy|Customer-Care} Officer** based on the ticket's service type. Copy or open-in-mail from the modal.
 - **Inbox reset** — `POST /api/admin/wipe` (admin-only) purges tickets/notifications/audits/OTPs. Used to clear the imaginary spam messages you saw.
 - **Voice recorder fixes** — clearer error messages, audio-file-upload fallback, iframe detection with an "Open in a new tab" button (the Emergent preview iframe blocks getUserMedia — opening the standalone URL always works).
+
+## Update · 2026-07-17 (v2.3)
+- **Real SMS via Twilio** (`/app/backend/sms.py`). `TWILIO_ACCOUNT_SID`/`TWILIO_AUTH_TOKEN`/`TWILIO_FROM=+18575752060` configured. Because it's a trial account, `TWILIO_TEST_OVERRIDE=+919980857971` redirects every outbound SMS to your one verified number with the intended recipient prefixed onto the message body.
+- Ticket-creation flow now dispatches both a **real email** (via Resend) AND a **real SMS** (via Twilio). Delivery id + status is captured on the notification.
+- Trial-account caveat: Twilio still requires the destination number to be **verified** in the Twilio console. Since you told me you haven't verified any number yet, please verify **+919980857971** at console.twilio.com/us1/develop/phone-numbers/manage/verified — until then Twilio accepts the message but won't actually deliver it (you'll see `SM…` SID in the DB, but no SMS lands on the phone).

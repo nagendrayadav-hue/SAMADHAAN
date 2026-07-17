@@ -38,6 +38,7 @@ from core import (
 from models import Policy, Office, OTP, Ticket, Notification, AuditLog
 from llm import translate_text, classify_intent, summarize_concern, generate_subject, draft_office_solution
 from mailer import send_email, OFFICIAL_TEMPLATE, team_for, chief_designation, department_for
+from sms import send_sms
 
 # ---------- setup ----------
 ROOT_DIR = Path(__file__).parent
@@ -69,6 +70,12 @@ async def push_notification(**kwargs) -> Notification:
 
     if n.type == "email" and n.to:
         result = await send_email(n.to, n.subject or "Samaadhaan", n.message)
+        doc["delivered"] = result.get("sent", False)
+        doc["provider_id"] = result.get("id")
+        doc["provider_error"] = result.get("error")
+
+    if n.type == "sms" and n.to:
+        result = await send_sms(n.to, n.message)
         doc["delivered"] = result.get("sent", False)
         doc["provider_id"] = result.get("id")
         doc["provider_error"] = result.get("error")
