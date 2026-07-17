@@ -57,6 +57,10 @@ scheduler = AsyncIOScheduler(timezone="UTC")
 
 
 # ---------- helpers ----------
+def gen_id_str() -> str:
+    return str(uuid.uuid4())
+
+
 async def audit(actor: str, action: str, entity: str, entity_ref: str | None = None, details: dict | None = None):
     log = AuditLog(actor=actor, action=action, entity=entity, entity_ref=entity_ref, details=details)
     await db.audits.insert_one(log.to_mongo())
@@ -120,22 +124,20 @@ async def seed_data():
         ]:
             await db.policies.insert_one(p.to_mongo())
 
-    if await db.offices.count_documents({}) == 0:
-        for o in [
-            Office(code="670100", password="670100", name="Mumbai Regional Office",
-                   email="office670100@newindia.co.in",
-                   claims_email="claims670100@newindia.co.in",
-                   grievance_email="grievance670100@newindia.co.in"),
-            Office(code="940000", password="940000", name="Delhi Regional Office",
-                   email="office940000@newindia.co.in",
-                   claims_email="claims940000@newindia.co.in",
-                   grievance_email="grievance940000@newindia.co.in"),
-            Office(code="admin", password="admin", name="Admin (All Offices)",
-                   email="admin@newindia.co.in",
-                   claims_email="admin@newindia.co.in",
-                   grievance_email="admin@newindia.co.in"),
-        ]:
-            await db.offices.insert_one(o.to_mongo())
+    # Unified mailbox format: nia.{code}@newindia.co.in for policy/claims/grievance/general.
+    unified_offices = [
+        ("670100", "Mumbai Regional Office"),
+        ("940000", "Delhi Regional Office"),
+        ("admin", "Admin (All Offices)"),
+    ]
+    for code, name in unified_offices:
+        mailbox = f"nia.{code}@newindia.co.in"
+        await db.offices.update_one(
+            {"code": code},
+            {"$set": {"email": mailbox, "claims_email": mailbox, "grievance_email": mailbox, "name": name},
+             "$setOnInsert": {"id": gen_id_str(), "code": code, "password": code}},
+            upsert=True,
+        )
 
 
 # ---------- request payloads ----------
@@ -524,12 +526,15 @@ async def resolve_ticket(ticket_pk: str, req: TicketResolveReq, payload: dict = 
             "updated_at": now_iso(),
         }},
     )
-    await push_notification(
-        type="sms", to=t["mobile"],
-        message=f"Ticket {t['ticket_id']} resolved. Solution ({LANG_MAP.get(req.target_language, req.target_language)}): {translated[:300]}",
-        ticket_id=t["ticket_id"],
-    )
-    await audit(payload["sub"], "resolved", "ticket", t["ticket_id"], {"target_language": req.target_language})
+    # SMS is disabled for tickets that were escalated (per user spec).
+    if not t.get("escalated"):
+        await push_notification(
+            type="sms", to=t["mobile"],
+            message=f"Ticket {t['ticket_id']} resolved. Solution ({LANG_MAP.get(req.target_language, req.target_language)}): {translated[:300]}",
+            ticket_id=t["ticket_id"],
+        )
+    await audit(payload["sub"], "resolved", "ticket", t["ticket_id"],
+                {"target_language": req.target_language, "sms_skipped": bool(t.get("escalated"))})
     t.update({
         "solution_text": req.solution_text, "solution_translated": translated,
         "solution_language": req.target_language, "attended": True, "status": "Done",
@@ -539,7 +544,13 @@ async def resolve_ticket(ticket_pk: str, req: TicketResolveReq, payload: dict = 
 
 @api.post("/tickets/{ticket_pk}/escalate")
 async def escalate_ticket(ticket_pk: str, payload: Optional[dict] = None, _actor: str = "system"):
-    """Escalate manually or from scheduler. When called via HTTP, payload comes from auth dep."""
+    """Escalate manually or from scheduler. When called via HTTP, payload comes from auth dep.
+
+    Behaviour per user spec:
+      • Sends an AI-drafted official-template email to Manjula Vishal (higher authority).
+      • Also CC's the office mailbox on the same envelope.
+      • SMS delivery is DISABLED for escalated tickets — nothing goes out on SMS.
+    """
     t = await db.tickets.find_one({"id": ticket_pk}, {"_id": 0})
     if not t:
         raise HTTPException(404, "Ticket not found")
@@ -552,27 +563,49 @@ async def escalate_ticket(ticket_pk: str, payload: Optional[dict] = None, _actor
         {"$set": {"escalated": True, "status": "Escalated", "updated_at": now_iso()},
          "$inc": {"escalation_count": 1}},
     )
-    await push_notification(
+
+    # Build the drafted mail using OFFICIAL_TEMPLATE + AI summary/subject
+    concern_summary = await summarize_concern(t.get("parsed_text", ""))
+    ai_subject = await generate_subject(t.get("parsed_text", ""))
+    subject = f"[URGENT · ESCALATION] {ai_subject} — {t['ticket_id']}"
+
+    body = OFFICIAL_TEMPLATE.format(
+        team="Manjula Vishal (Higher Authority)",
+        customer_name=t.get("customer_name") or "New Caller",
+        policy_no=t.get("policy_no") or "—",
+        mobile=t.get("mobile") or "—",
+        customer_email="—",
+        subject=ai_subject,
+        concern=(
+            f"IMMEDIATE ATTENTION NEEDED — this ticket has been open for over 24 hours without action.\n\n"
+            f"{concern_summary}\n\n"
+            f"Assigned office: {t.get('office_code')}  ·  Service: {t.get('service_type')}  ·  Priority: {t.get('priority')}"
+        ),
+        signer_name="Samaadhaan Automated Escalation",
+        signer_designation="24h SLA Watchdog",
+        department="Grievance Cell",
+        company="New India Assurance",
+    )
+
+    off = await db.offices.find_one({"code": t.get("office_code")}, {"_id": 0})
+    office_mail = off.get("email") if off else t.get("target_email")
+
+    # Single drafted mail to Manjula (with office CC'd). NO SMS on escalation.
+    n = Notification(
         type="email", to=HIGHER_AUTHORITY_EMAIL,
-        subject=f"[URGENT] Immediate attention needed — {t['ticket_id']}",
-        message=(
-            f"Immediate attention needed.\n\nTicket: {t['ticket_id']}\nMobile: {t['mobile']}\n"
-            f"Policy: {t.get('policy_no') or 'N/A'}\nOffice: {t.get('office_code')}\n\n"
-            f"Customer's issue:\n{t.get('parsed_text')}\n\n(Audio attached). The office is being notified."
-        ),
-        ticket_id=t["ticket_id"],
+        subject=subject, message=body, ticket_id=t["ticket_id"],
     )
-    await push_notification(
-        type="email", to=t.get("target_email"),
-        subject=f"[NOTIFY] Case escalated to higher authority — {t['ticket_id']}",
-        message=(
-            f"Case escalated to Manjula Vishal due to no action for 24+ hours.\n\n"
-            f"Ticket: {t['ticket_id']}\nCustomer: {t['mobile']}\n\nPlease act immediately."
-        ),
-        ticket_id=t["ticket_id"],
-    )
-    await audit(actor, "escalated", "ticket", t["ticket_id"])
-    return {"status": "escalated"}
+    doc = n.to_mongo()
+    result = await send_email(HIGHER_AUTHORITY_EMAIL, subject, body,
+                              cc=[office_mail] if office_mail else None)
+    doc["delivered"] = result.get("sent", False)
+    doc["provider_id"] = result.get("id")
+    doc["provider_error"] = result.get("error")
+    doc["cc"] = [office_mail] if office_mail else []
+    await db.notifications.insert_one(doc)
+
+    await audit(actor, "escalated", "ticket", t["ticket_id"], {"to": HIGHER_AUTHORITY_EMAIL, "cc": office_mail})
+    return {"status": "escalated", "email_id": result.get("id")}
 
 
 @api.post("/tickets/{ticket_pk}/escalate-auth")

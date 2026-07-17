@@ -77,3 +77,8 @@ Multi-role New India Assurance customer service portal ("Samaadhaan") with:
 - **Real SMS via Twilio** (`/app/backend/sms.py`). `TWILIO_ACCOUNT_SID`/`TWILIO_AUTH_TOKEN`/`TWILIO_FROM=+18575752060` configured. Because it's a trial account, `TWILIO_TEST_OVERRIDE=+919980857971` redirects every outbound SMS to your one verified number with the intended recipient prefixed onto the message body.
 - Ticket-creation flow now dispatches both a **real email** (via Resend) AND a **real SMS** (via Twilio). Delivery id + status is captured on the notification.
 - Trial-account caveat: Twilio still requires the destination number to be **verified** in the Twilio console. Since you told me you haven't verified any number yet, please verify **+919980857971** at console.twilio.com/us1/develop/phone-numbers/manage/verified — until then Twilio accepts the message but won't actually deliver it (you'll see `SM…` SID in the DB, but no SMS lands on the phone).
+
+## Update · 2026-07-17 (v2.4)
+- **Unified office mailbox**: all offices now use `nia.{code}@newindia.co.in` (single mailbox per partition — 670100, 940000, admin — replaces the earlier office/claims/grievance split). Startup migration updates existing seeded rows.
+- **Escalation → drafted mail**: 24h auto-escalation and manual escalate now build a full AI-drafted envelope (LLM-generated subject + concern summary) rendered into the official template, addressed to `manjula.vishal@newindia.co.in`, with the office CC'd. Signed by "Samaadhaan Automated Escalation · 24h SLA Watchdog · Grievance Cell · New India Assurance".
+- **SMS disabled on escalation**: no SMS is dispatched during escalation, and resolving an already-escalated ticket also skips the customer SMS.
