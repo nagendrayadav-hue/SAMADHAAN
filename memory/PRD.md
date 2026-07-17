@@ -58,3 +58,10 @@ Multi-role New India Assurance customer service portal ("Samaadhaan") with:
 - P2: Push notifications / websocket for real-time ticket updates
 - P2: OMBUDSMAN / IRDAI escalation tier above Manjula
 - P2: Customer self-service SLA tracker with countdown
+
+## Update · 2026-07-17 (v2.1)
+- **Exact formatting applied from reference HTML**: dark `#080C14` background, `#0F1626` panels, `#1E293B` borders, `#FBBF24` gold accent, `#3B82F6` blue, `#10B981` green. Fonts: Plus Jakarta Sans (body), Cormorant Garamond (aesthetic-serif), JetBrains Mono (identifiers). Sticky translucent header with the "S" gold badge. Custom scrollbars.
+- **Internal Inbox** (`GET /api/inbox`): office-scoped envelope viewer that surfaces every mock-email routed to any of the logged-in office's addresses (office/claims/grievance). Each item is enriched with its linked ticket so an office can go from an incoming envelope → ticket dialog in one click. Admin sees the whole network.
+- **Mark-read** (`POST /api/inbox/{id}/mark-read`) tracks which envelopes an office has opened.
+- **Live polling** on the dashboard every 5s + toast on new incoming envelope — so an office truly sees customer mail land in real time.
+- 36/36 backend tests passed (iteration_2.json).
