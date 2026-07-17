@@ -82,3 +82,9 @@ Multi-role New India Assurance customer service portal ("Samaadhaan") with:
 - **Unified office mailbox**: all offices now use `nia.{code}@newindia.co.in` (single mailbox per partition — 670100, 940000, admin — replaces the earlier office/claims/grievance split). Startup migration updates existing seeded rows.
 - **Escalation → drafted mail**: 24h auto-escalation and manual escalate now build a full AI-drafted envelope (LLM-generated subject + concern summary) rendered into the official template, addressed to `manjula.vishal@newindia.co.in`, with the office CC'd. Signed by "Samaadhaan Automated Escalation · 24h SLA Watchdog · Grievance Cell · New India Assurance".
 - **SMS disabled on escalation**: no SMS is dispatched during escalation, and resolving an already-escalated ticket also skips the customer SMS.
+
+## Update · 2026-07-17 (v2.5)
+- **Contextual escalation mail** — the drafted envelope now carries: escalation reason (24h SLA breach vs manual), exact ticket age in hours, escalation attempt number, assigned office name+code, service category, AI-classified priority + sentiment (re-classified at escalation time), original language, an AI concern summary, and the verbatim voice-note transcript.
+- **Auto-send on escalation** — clicking Escalate (or the 24h auto-escalation firing) now actually delivers the mail via Resend to `manjula.vishal@newindia.co.in` and returns `{delivered: true, email_id}` so the office sees provider confirmation instantly.
+- **Auto-send on AI-email button** — the frontend AI-email modal now has a "Send now" action. Recipient is editable inline; success shows the Resend provider id.
+- Resend sandbox fix: when `TEST_EMAIL_OVERRIDE` is active, CC recipients are dropped (Resend sandbox rejects any unverified CC address). CC is restored automatically once you verify a domain and remove the override.

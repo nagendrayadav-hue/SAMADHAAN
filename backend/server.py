@@ -183,6 +183,8 @@ class AIEmailReq(BaseModel):
     customer_email: Optional[str] = None    # optional override, else derived
     signer_name: Optional[str] = None
     signer_designation: Optional[str] = None
+    send: bool = False        # if true, also deliver via Resend
+    override_to: Optional[str] = None   # if provided, deliver to this address instead of default
 
 
 # ============================================================
@@ -231,12 +233,32 @@ async def draft_email(req: AIEmailReq):
         department=department,
         company=company,
     )
+
+    delivery = None
+    default_to = t.get("target_email") if req.role == "customer" else req.customer_email
+    to_addr = req.override_to or default_to
+    if req.send and to_addr:
+        result = await send_email(to_addr, subject, body)
+        n = Notification(
+            type="email", to=to_addr, subject=subject, message=body, ticket_id=t["ticket_id"],
+        )
+        doc = n.to_mongo()
+        doc["delivered"] = result.get("sent", False)
+        doc["provider_id"] = result.get("id")
+        doc["provider_error"] = result.get("error")
+        await db.notifications.insert_one(doc)
+        await audit(f"ai:{req.role}", "email_sent", "ticket", t["ticket_id"],
+                    {"to": to_addr, "delivered": result.get("sent", False)})
+        delivery = {"sent": result.get("sent", False), "id": result.get("id"),
+                    "error": result.get("error"), "to": to_addr}
+
     return {
         "subject": subject,
         "body": body,
-        "to": t.get("target_email") if req.role == "customer" else None,
+        "to": to_addr,
         "team": team,
         "signer_designation": signer_designation,
+        "delivery": delivery,
     }
 
 
@@ -544,12 +566,10 @@ async def resolve_ticket(ticket_pk: str, req: TicketResolveReq, payload: dict = 
 
 @api.post("/tickets/{ticket_pk}/escalate")
 async def escalate_ticket(ticket_pk: str, payload: Optional[dict] = None, _actor: str = "system"):
-    """Escalate manually or from scheduler. When called via HTTP, payload comes from auth dep.
+    """Escalate manually or from scheduler.
 
-    Behaviour per user spec:
-      • Sends an AI-drafted official-template email to Manjula Vishal (higher authority).
-      • Also CC's the office mailbox on the same envelope.
-      • SMS delivery is DISABLED for escalated tickets — nothing goes out on SMS.
+    Auto-sends a contextual, AI-drafted email through Resend directly to
+    manjula.vishal@newindia.co.in (CC: office). No SMS is triggered.
     """
     t = await db.tickets.find_one({"id": ticket_pk}, {"_id": 0})
     if not t:
@@ -558,16 +578,56 @@ async def escalate_ticket(ticket_pk: str, payload: Optional[dict] = None, _actor
         raise HTTPException(400, "Already resolved")
 
     actor = payload["sub"] if payload else _actor
+    reason = "24h+ SLA breach — no action from office" if actor == "system" else f"Manual escalation by {actor}"
+    now_dt = parse_iso(now_iso())
+    created_dt = parse_iso(t["created_at"])
+    age_hours = round(max((now_dt - created_dt).total_seconds(), 0) / 3600, 1)
+    escalation_number = int(t.get("escalation_count", 0)) + 1
+
     await db.tickets.update_one(
         {"id": ticket_pk},
         {"$set": {"escalated": True, "status": "Escalated", "updated_at": now_iso()},
          "$inc": {"escalation_count": 1}},
     )
 
-    # Build the drafted mail using OFFICIAL_TEMPLATE + AI summary/subject
+    # Fresh AI classification snapshot at escalation time (priority + sentiment).
+    cls = await classify_intent(t.get("parsed_text", "")) if t.get("parsed_text") else {"priority": t.get("priority"), "sentiment": t.get("sentiment"), "service_type": t.get("service_type")}
+    # Persist enriched signals back onto the ticket.
+    await db.tickets.update_one(
+        {"id": ticket_pk},
+        {"$set": {
+            "priority": cls.get("priority") or t.get("priority") or "normal",
+            "sentiment": cls.get("sentiment") or t.get("sentiment"),
+        }},
+    )
+
     concern_summary = await summarize_concern(t.get("parsed_text", ""))
     ai_subject = await generate_subject(t.get("parsed_text", ""))
-    subject = f"[URGENT · ESCALATION] {ai_subject} — {t['ticket_id']}"
+    subject = f"[URGENT · ESCALATION #{escalation_number}] {ai_subject} — {t['ticket_id']}"
+
+    off = await db.offices.find_one({"code": t.get("office_code")}, {"_id": 0})
+    office_mail = off.get("email") if off else t.get("target_email")
+    office_name = off.get("name") if off else t.get("office_code")
+
+    context_lines = [
+        f"IMMEDIATE ATTENTION REQUIRED — {reason}.",
+        "",
+        f"Ticket ID: {t['ticket_id']}",
+        f"Age since creation: {age_hours} hours",
+        f"Escalation attempt: #{escalation_number}",
+        f"Assigned office: {office_name} ({t.get('office_code')})",
+        f"Service category: {t.get('service_type', '').upper()}",
+        f"Priority (AI-classified): {cls.get('priority', 'normal').upper()}",
+        f"Sentiment (AI-classified): {cls.get('sentiment', 'neutral').upper()}",
+        f"Original language: {t.get('language', 'en').upper()}",
+        "",
+        "─── Customer's concern (AI-summarised) ───",
+        concern_summary,
+        "",
+        "─── Verbatim voice-note transcript ───",
+        t.get("parsed_text", "(no transcript)"),
+    ]
+    concern_block = "\n".join(context_lines)
 
     body = OFFICIAL_TEMPLATE.format(
         team="Manjula Vishal (Higher Authority)",
@@ -576,21 +636,14 @@ async def escalate_ticket(ticket_pk: str, payload: Optional[dict] = None, _actor
         mobile=t.get("mobile") or "—",
         customer_email="—",
         subject=ai_subject,
-        concern=(
-            f"IMMEDIATE ATTENTION NEEDED — this ticket has been open for over 24 hours without action.\n\n"
-            f"{concern_summary}\n\n"
-            f"Assigned office: {t.get('office_code')}  ·  Service: {t.get('service_type')}  ·  Priority: {t.get('priority')}"
-        ),
+        concern=concern_block,
         signer_name="Samaadhaan Automated Escalation",
         signer_designation="24h SLA Watchdog",
         department="Grievance Cell",
         company="New India Assurance",
     )
 
-    off = await db.offices.find_one({"code": t.get("office_code")}, {"_id": 0})
-    office_mail = off.get("email") if off else t.get("target_email")
-
-    # Single drafted mail to Manjula (with office CC'd). NO SMS on escalation.
+    # Auto-deliver through Resend. Record the notification with delivery status.
     n = Notification(
         type="email", to=HIGHER_AUTHORITY_EMAIL,
         subject=subject, message=body, ticket_id=t["ticket_id"],
@@ -604,8 +657,17 @@ async def escalate_ticket(ticket_pk: str, payload: Optional[dict] = None, _actor
     doc["cc"] = [office_mail] if office_mail else []
     await db.notifications.insert_one(doc)
 
-    await audit(actor, "escalated", "ticket", t["ticket_id"], {"to": HIGHER_AUTHORITY_EMAIL, "cc": office_mail})
-    return {"status": "escalated", "email_id": result.get("id")}
+    await audit(actor, "escalated", "ticket", t["ticket_id"],
+                {"to": HIGHER_AUTHORITY_EMAIL, "cc": office_mail, "reason": reason,
+                 "age_hours": age_hours, "attempt": escalation_number,
+                 "delivered": result.get("sent", False)})
+    return {
+        "status": "escalated",
+        "delivered": result.get("sent", False),
+        "email_id": result.get("id"),
+        "to": HIGHER_AUTHORITY_EMAIL,
+        "cc": office_mail,
+    }
 
 
 @api.post("/tickets/{ticket_pk}/escalate-auth")

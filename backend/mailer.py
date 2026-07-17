@@ -43,7 +43,9 @@ async def send_email(to: str, subject: str, body: str, cc: Optional[list] = None
             "subject": subject,
             "text": body,
         }
-        if cc:
+        # Only include CC when we're not overriding (Resend sandbox rejects
+        # every unverified address, including CC recipients).
+        if cc and not override:
             params["cc"] = cc
         r = resend.Emails.send(params)
         return {"sent": True, "id": r.get("id") if isinstance(r, dict) else str(r), "redirected_to": override or None}
