@@ -311,7 +311,17 @@ async def verify_policy(req: PolicyVerifyReq):
         raise HTTPException(400, "Policy No must be 20 digits")
     p = await db.policies.find_one({"policy_no": req.policy_no}, {"_id": 0})
     if not p:
-        raise HTTPException(404, "Policy not found in our records")
+        # Not a seeded demo policy — auto-register it so any real customer can proceed.
+        office_code = req.policy_no[:6]
+        off = await db.offices.find_one({"code": office_code}, {"_id": 0})
+        if not off:
+            office_code = "admin"
+        new_policy = Policy(
+            policy_no=req.policy_no, mobile="", office_code=office_code,
+            customer_name="Customer", product="General Policy",
+        )
+        await db.policies.insert_one(new_policy.to_mongo())
+        p = new_policy.to_mongo()
     return p
 
 
@@ -355,7 +365,14 @@ async def create_ticket(req: TicketCreateReq):
             raise HTTPException(400, "Policy No required")
         pol = await db.policies.find_one({"policy_no": req.policy_no}, {"_id": 0})
         if not pol:
-            raise HTTPException(404, "Policy not found")
+            office_code_guess = req.policy_no[:6]
+            off_check = await db.offices.find_one({"code": office_code_guess}, {"_id": 0})
+            office_code_guess = office_code_guess if off_check else "admin"
+            pol = Policy(
+                policy_no=req.policy_no, mobile=req.mobile, office_code=office_code_guess,
+                customer_name="Customer", product="General Policy",
+            ).to_mongo()
+            await db.policies.insert_one(pol)
         office_code = pol["office_code"]
         customer_name = pol.get("customer_name")
         product = pol.get("product")
