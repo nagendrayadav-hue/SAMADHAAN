@@ -119,7 +119,7 @@ export default function AIEmail({ ticketId, role = "customer", trigger, customer
               <div>
                 <div className="mono text-[10px] uppercase tracking-widest mb-1" style={{ color: MUTED }}>Body</div>
                 <pre className="rounded-md p-4 whitespace-pre-wrap text-sm font-sans"
-                     style={{ background: DARK, border: `1px solid ${BORDER}`, color: LIGHT, fontFamily: "'Plus Jakarta Sans',sans-serif" }}
+                     style={{ background: DARK, border: `1px solid ${BORDER}`, color: LIGHT, fontFamily: "'Geist',sans-serif" }}
                      data-testid="ai-email-body">
 {draft.body}
                 </pre>

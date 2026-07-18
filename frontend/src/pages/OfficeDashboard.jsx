@@ -13,6 +13,7 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { toast } from "sonner";
 import { LogOut, Volume2, AlertTriangle, Clock, CheckCircle2, Bell, RefreshCcw, Download, Search, BarChart3, Mail, Inbox as InboxIcon, MailOpen, ChevronRight } from "lucide-react";
 import AIEmail from "@/components/AIEmail";
+import EscalateModal from "@/components/EscalateModal";
 
 const DARK = "#080C14", PANEL = "#0F1626", BORDER = "#1E293B", GOLD = "#FBBF24", BLUE = "#3B82F6", GREEN = "#10B981", MUTED = "#94A3B8", LIGHT = "#F1F5F9";
 
@@ -41,7 +42,10 @@ export default function OfficeDashboard() {
   const [statusF, setStatusF] = useState(savedPrefs.statusF || "");
   const [serviceF, setServiceF] = useState(savedPrefs.serviceF || "");
   const [priorityF, setPriorityF] = useState(savedPrefs.priorityF || "");
-  const [tab, setTab] = useState(savedPrefs.tab || "inbox");
+  const [tab, setTab] = useState(
+    ["inbox", "pending", "inprogress", "resolved", "notifs", "insights"].includes(savedPrefs.tab)
+      ? savedPrefs.tab : "pending"
+  );
   const [notifs, setNotifs] = useState([]);
   const [active, setActive] = useState(null);
   const [selectedMail, setSelectedMail] = useState(null);
@@ -50,6 +54,7 @@ export default function OfficeDashboard() {
   const [busy, setBusy] = useState(false);
   const [analytics, setAnalytics] = useState(null);
   const seenMailIds = useRef(new Set());
+  const [escalateOpen, setEscalateOpen] = useState(false);
   const LIMIT = 20;
 
   // Persist filter prefs
@@ -63,7 +68,7 @@ export default function OfficeDashboard() {
     setOffice(o.office);
   }, []);
 
-  useEffect(() => { if (office) load(); }, [office, page, q, statusF, serviceF, priorityF]);
+  useEffect(() => { if (office) load(); }, [office, page, q, serviceF, priorityF]);
 
   // Auto-refresh every 5s for the internal inbox feel
   useEffect(() => {
@@ -74,9 +79,8 @@ export default function OfficeDashboard() {
 
   const load = async () => {
     try {
-      const params = { page, limit: LIMIT };
+      const params = { page, limit: 200 };  // fetch a wide window; tabs filter client-side
       if (q) params.q = q;
-      if (statusF) params.status = statusF;
       if (serviceF) params.service_type = serviceF;
       if (priorityF) params.priority = priorityF;
       const [t, n, a, i] = await Promise.all([
@@ -87,7 +91,6 @@ export default function OfficeDashboard() {
       ]);
       setTickets(t.data.items); setTotal(t.data.total);
       setNotifs(n.data); setAnalytics(a.data); setInbox(i.data);
-      // First load: seed seen ids
       if (seenMailIds.current.size === 0) i.data.forEach((m) => seenMailIds.current.add(m.id));
     } catch {}
   };
@@ -130,7 +133,7 @@ export default function OfficeDashboard() {
   };
 
   const simulateAge = async (id) => { await api.post(`/tickets/${id}/simulate-aging`); toast.info("Ticket aged 25h."); load(); };
-  const escalate = async (id) => { await api.post(`/tickets/${id}/escalate-auth`); toast.warning("Escalated to Manjula Vishal."); setActive(null); load(); };
+  const openEscalate = () => setEscalateOpen(true);
   const autoEscalate = async () => { const r = await api.post("/tickets/auto-escalate"); toast(`${r.data.escalated_count} ticket(s) escalated`); load(); };
 
   const exportCsv = () => {
@@ -195,20 +198,39 @@ export default function OfficeDashboard() {
         </div>
       </div>
 
+      {/* HERO — big-figures metric strip */}
       {analytics && (
-        <div className="mt-8 grid grid-cols-2 md:grid-cols-5 gap-3">
-          {[
-            ["Envelopes", analytics.total, LIGHT],
-            ["Pending", analytics.by_status.Open || 0, GOLD],
-            ["Escalated", analytics.by_status.Escalated || 0, "#F87171"],
-            ["Resolved", analytics.by_status.Done || 0, GREEN],
-            ["Avg SLA", `${analytics.avg_resolution_hours}h`, BLUE],
-          ].map(([l, v, c]) => (
-            <div key={l} className="rounded-xl p-4" style={{ background: PANEL, border: `1px solid ${BORDER}` }}>
-              <div className="mono text-[10px] uppercase tracking-[0.24em]" style={{ color: MUTED }}>{l}</div>
-              <div className="aesthetic-serif text-4xl mt-1" style={{ color: c }}>{v}</div>
+        <div className="mt-8 rounded-2xl p-6 md:p-8"
+             style={{ background: "linear-gradient(135deg, #0F1626 0%, #0a1020 100%)",
+                      border: `1px solid ${BORDER}`,
+                      boxShadow: "0 30px 80px -40px rgba(251,191,36,0.15)" }}>
+          <div className="flex items-center justify-between flex-wrap gap-3 mb-6">
+            <div>
+              <div className="mono text-[10px] uppercase tracking-[0.28em]" style={{ color: MUTED }}>KPI Hero · Live</div>
+              <div className="font-display text-3xl md:text-4xl mt-2">Grievance Redressal Snapshot</div>
             </div>
-          ))}
+            <div className="mono text-[10px] uppercase tracking-[0.24em] px-3 py-1.5 rounded-full flex items-center gap-2"
+                 style={{ background: DARK, border: `1px solid ${BORDER}`, color: GREEN }}>
+              <span className="w-1.5 h-1.5 rounded-full dot-pulse" style={{ background: GREEN }} />
+              polling · 5s
+            </div>
+          </div>
+          <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+            {[
+              ["Total envelopes", analytics.total, LIGHT, ""],
+              ["Pending", (analytics.by_status.Open || 0) + (analytics.by_status.Escalated || 0), GOLD, "unresolved · needs attention"],
+              ["In progress", analytics.by_status.InProgress || 0, BLUE, "actively worked on"],
+              ["Resolved", analytics.by_status.Done || 0, GREEN, "closed · attended"],
+              ["Avg SLA", `${analytics.avg_resolution_hours}h`, "#F87171", "avg time to resolve"],
+            ].map(([l, v, c, sub]) => (
+              <div key={l} className="rounded-xl p-4 md:p-5"
+                   style={{ background: DARK, border: `1px solid ${BORDER}` }}>
+                <div className="mono text-[10px] uppercase tracking-[0.24em]" style={{ color: MUTED }}>{l}</div>
+                <div className="font-display text-4xl md:text-5xl mt-1" style={{ color: c }}>{v}</div>
+                {sub && <div className="mono text-[10px] mt-1" style={{ color: MUTED }}>{sub}</div>}
+              </div>
+            ))}
+          </div>
         </div>
       )}
 
@@ -218,9 +240,11 @@ export default function OfficeDashboard() {
           <TabsTrigger value="inbox" data-testid="tab-inbox">
             <InboxIcon size={12} className="mr-1.5" /> Inbox {unreadCount > 0 && <span className="ml-2 px-1.5 py-0.5 rounded-full text-[9px] font-bold" style={{ background: GOLD, color: DARK }}>{unreadCount}</span>}
           </TabsTrigger>
-          <TabsTrigger value="tickets" data-testid="tab-tickets">Tickets</TabsTrigger>
+          <TabsTrigger value="pending" data-testid="tab-pending">Pending</TabsTrigger>
+          <TabsTrigger value="inprogress" data-testid="tab-inprogress">In Progress</TabsTrigger>
+          <TabsTrigger value="resolved" data-testid="tab-resolved">Resolved</TabsTrigger>
           <TabsTrigger value="notifs" data-testid="tab-notifs">
-            <Bell size={12} className="mr-1.5" /> All Dispatches
+            <Bell size={12} className="mr-1.5" /> Dispatches
           </TabsTrigger>
           <TabsTrigger value="insights" data-testid="tab-insights">
             <BarChart3 size={12} className="mr-1.5" /> Insights
@@ -324,108 +348,20 @@ export default function OfficeDashboard() {
           </div>
         </TabsContent>
 
-        {/* TICKETS */}
-        <TabsContent value="tickets">
-          <div className="mt-4 grid md:grid-cols-4 gap-2">
-            <div className="relative md:col-span-2">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2" size={14} style={{ color: MUTED }} />
-              <Input placeholder="Search ticket · mobile · policy · text…" value={q}
-                onChange={(e) => { setPage(1); setQ(e.target.value); }} className="pl-9 h-11 mono"
-                style={{ background: PANEL, borderColor: BORDER }}
-                data-testid="search-input" />
-            </div>
-            <Select value={statusF || "all"} onValueChange={(v) => { setPage(1); setStatusF(v === "all" ? "" : v); }}>
-              <SelectTrigger className="h-11" style={{ background: PANEL, borderColor: BORDER }} data-testid="filter-status">
-                <SelectValue placeholder="Status" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All statuses</SelectItem>
-                {["Open", "InProgress", "Escalated", "Done"].map((s) => <SelectItem key={s} value={s}>{s}</SelectItem>)}
-              </SelectContent>
-            </Select>
-            <Select value={serviceF || "all"} onValueChange={(v) => { setPage(1); setServiceF(v === "all" ? "" : v); }}>
-              <SelectTrigger className="h-11" style={{ background: PANEL, borderColor: BORDER }} data-testid="filter-service">
-                <SelectValue placeholder="Service" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All services</SelectItem>
-                {["policy", "claims", "grievance", "service"].map((s) => <SelectItem key={s} value={s}>{s}</SelectItem>)}
-              </SelectContent>
-            </Select>
-          </div>
-
-          <div className="mt-4 flex gap-2 flex-wrap">
-            {["", "urgent", "high", "normal", "low"].map((p) => (
-              <button key={p || "all"} onClick={() => { setPage(1); setPriorityF(p); }}
-                className="px-3 py-1 rounded-full mono text-[10px] uppercase tracking-widest"
-                style={priorityF === p
-                  ? { background: GOLD, color: DARK, border: `1px solid ${GOLD}` }
-                  : { background: PANEL, color: MUTED, border: `1px solid ${BORDER}` }}
-                data-testid={`priority-${p || "all"}`}>
-                {p || "all priorities"}
-              </button>
-            ))}
-          </div>
-
-          <div className="mt-4 space-y-3">
-            {tickets.length === 0 && (
-              <div className="text-center py-16 rounded-2xl mono text-xs uppercase tracking-widest"
-                   style={{ background: PANEL, border: `1px dashed ${BORDER}`, color: MUTED }}>
-                No tickets in this view.
-              </div>
-            )}
-            {tickets.map((t) => {
-              const s = statusPill[t.status] || statusPill.Open;
-              const pr = priorityPill[t.priority || "normal"];
-              return (
-                <div key={t.id} className="card-lift rounded-2xl p-5 cursor-pointer"
-                     style={{ background: PANEL, border: `1px solid ${BORDER}` }}
-                     onClick={() => openTicket(t)}
-                     data-testid={`row-${t.ticket_id}`}>
-                  <div className="flex items-start justify-between flex-wrap gap-3">
-                    <div>
-                      <div className="mono text-[10px] uppercase tracking-widest" style={{ color: MUTED }}>{new Date(t.created_at).toLocaleString()}</div>
-                      <div className="aesthetic-serif text-2xl mt-1">{t.ticket_id}</div>
-                      <div className="mono text-[10px] uppercase tracking-[0.24em] mt-1" style={{ color: MUTED }}>
-                        {t.service_type} · {t.customer_type} · office {t.office_code} · lang {t.language}
-                      </div>
-                    </div>
-                    <div className="flex flex-col items-end gap-2">
-                      <div className="flex items-center gap-2 flex-wrap justify-end">
-                        <span className="px-2.5 py-1 rounded-md mono text-[10px] uppercase tracking-widest"
-                          style={{ background: s.bg, color: s.color, border: `1px solid ${s.border}` }}>{t.status}</span>
-                        <span className="px-2.5 py-1 rounded-md mono text-[10px] uppercase tracking-widest"
-                          style={{ background: pr.bg, color: pr.color, border: `1px solid ${pr.border}` }}>{t.priority}</span>
-                      </div>
-                      {t.escalated && (
-                        <div className="text-[10px] mono flex items-center gap-1" style={{ color: "#F87171" }}>
-                          <AlertTriangle size={10} /> Escalated
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                  <div className="mt-3 text-sm line-clamp-2 aesthetic-serif" style={{ color: LIGHT }}>{t.parsed_text}</div>
-                </div>
-              );
-            })}
-          </div>
-
-          {pages > 1 && (
-            <div className="mt-6 flex justify-between items-center">
-              <div className="mono text-xs" style={{ color: MUTED }}>{total} · page {page}/{pages}</div>
-              <div className="flex gap-2">
-                <Button variant="outline" disabled={page <= 1} onClick={() => setPage((p) => p - 1)}
-                  className="uppercase mono tracking-widest"
-                  style={{ background: PANEL, borderColor: BORDER, color: LIGHT }}
-                  data-testid="prev-page">Prev</Button>
-                <Button variant="outline" disabled={page >= pages} onClick={() => setPage((p) => p + 1)}
-                  className="uppercase mono tracking-widest"
-                  style={{ background: PANEL, borderColor: BORDER, color: LIGHT }}
-                  data-testid="next-page">Next</Button>
-              </div>
-            </div>
-          )}
-        </TabsContent>
+        {/* Shared ticket list — used inside Pending / In Progress / Resolved tabs */}
+        {["pending", "inprogress", "resolved"].map((bucket) => (
+          <TabsContent key={bucket} value={bucket}>
+            <TicketListBlock
+              tickets={tickets.filter((t) => bucketMatches(bucket, t))}
+              q={q} setQ={setQ}
+              serviceF={serviceF} setServiceF={setServiceF}
+              priorityF={priorityF} setPriorityF={setPriorityF}
+              openTicket={openTicket}
+              page={page} pages={pages} setPage={setPage}
+              total={total}
+            />
+          </TabsContent>
+        ))}
 
         {/* NOTIFS */}
         <TabsContent value="notifs">
@@ -551,7 +487,7 @@ export default function OfficeDashboard() {
                       data-testid="age-btn">
                       <Clock size={12} className="mr-2" /> Age 25h
                     </Button>
-                    <Button variant="destructive" onClick={() => escalate(active.id)}
+                    <Button variant="destructive" onClick={openEscalate}
                       className="uppercase mono tracking-widest h-11"
                       data-testid="escalate-btn">
                       <AlertTriangle size={12} className="mr-2" /> Escalate
@@ -576,7 +512,118 @@ export default function OfficeDashboard() {
           )}
         </DialogContent>
       </Dialog>
+      <EscalateModal
+        open={escalateOpen}
+        onOpenChange={setEscalateOpen}
+        ticket={active}
+        adminDefault={office.name}
+        onEscalated={() => { setActive(null); load(); }}
+      />
     </Shell>
+  );
+}
+
+function bucketMatches(bucket, t) {
+  if (bucket === "pending") return t.status === "Open" || t.status === "Escalated";
+  if (bucket === "inprogress") return t.status === "InProgress";
+  if (bucket === "resolved") return t.status === "Done";
+  return true;
+}
+
+function TicketListBlock({ tickets, q, setQ, serviceF, setServiceF, priorityF, setPriorityF, openTicket, page, pages, setPage, total }) {
+  return (
+    <>
+      <div className="mt-4 grid md:grid-cols-3 gap-2">
+        <div className="relative md:col-span-2">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2" size={14} style={{ color: MUTED }} />
+          <Input placeholder="Search ticket · mobile · policy · text…" value={q}
+            onChange={(e) => { setPage(1); setQ(e.target.value); }} className="pl-9 h-11 mono"
+            style={{ background: PANEL, borderColor: BORDER }}
+            data-testid="search-input" />
+        </div>
+        <Select value={serviceF || "all"} onValueChange={(v) => { setPage(1); setServiceF(v === "all" ? "" : v); }}>
+          <SelectTrigger className="h-11" style={{ background: PANEL, borderColor: BORDER }} data-testid="filter-service">
+            <SelectValue placeholder="Service" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All services</SelectItem>
+            {["policy", "claims", "grievance", "service"].map((s) => <SelectItem key={s} value={s}>{s}</SelectItem>)}
+          </SelectContent>
+        </Select>
+      </div>
+
+      <div className="mt-4 flex gap-2 flex-wrap">
+        {["", "urgent", "high", "normal", "low"].map((p) => (
+          <button key={p || "all"} onClick={() => { setPage(1); setPriorityF(p); }}
+            className="px-3 py-1 rounded-full mono text-[10px] uppercase tracking-widest"
+            style={priorityF === p
+              ? { background: GOLD, color: DARK, border: `1px solid ${GOLD}` }
+              : { background: PANEL, color: MUTED, border: `1px solid ${BORDER}` }}
+            data-testid={`priority-${p || "all"}`}>
+            {p || "all priorities"}
+          </button>
+        ))}
+      </div>
+
+      <div className="mt-4 space-y-3">
+        {tickets.length === 0 && (
+          <div className="text-center py-16 rounded-2xl mono text-xs uppercase tracking-widest"
+               style={{ background: PANEL, border: `1px dashed ${BORDER}`, color: MUTED }}>
+            No tickets in this view.
+          </div>
+        )}
+        {tickets.map((t) => {
+          const s = statusPill[t.status] || statusPill.Open;
+          const pr = priorityPill[t.priority || "normal"];
+          return (
+            <div key={t.id} className="card-lift rounded-2xl p-5 cursor-pointer"
+                 style={{ background: PANEL, border: `1px solid ${BORDER}` }}
+                 onClick={() => openTicket(t)}
+                 data-testid={`row-${t.ticket_id}`}>
+              <div className="flex items-start justify-between flex-wrap gap-3">
+                <div>
+                  <div className="mono text-[10px] uppercase tracking-widest" style={{ color: MUTED }}>{new Date(t.created_at).toLocaleString()}</div>
+                  <div className="font-display text-xl mt-1">{t.ticket_id}</div>
+                  <div className="mono text-[10px] uppercase tracking-[0.24em] mt-1" style={{ color: MUTED }}>
+                    {t.service_type} · {t.customer_type} · office {t.office_code} · lang {t.language}
+                  </div>
+                </div>
+                <div className="flex flex-col items-end gap-2">
+                  <div className="flex items-center gap-2 flex-wrap justify-end">
+                    <span className="px-2.5 py-1 rounded-md mono text-[10px] uppercase tracking-widest"
+                      style={{ background: s.bg, color: s.color, border: `1px solid ${s.border}` }}>{t.status}</span>
+                    <span className="px-2.5 py-1 rounded-md mono text-[10px] uppercase tracking-widest"
+                      style={{ background: pr.bg, color: pr.color, border: `1px solid ${pr.border}` }}>{t.priority}</span>
+                  </div>
+                  {t.escalated && (
+                    <div className="text-[10px] mono flex items-center gap-1" style={{ color: "#F87171" }}>
+                      <AlertTriangle size={10} /> Escalated
+                    </div>
+                  )}
+                </div>
+              </div>
+              <div className="mt-3 text-sm line-clamp-2" style={{ color: LIGHT }}>{t.parsed_text}</div>
+            </div>
+          );
+        })}
+      </div>
+
+      {pages > 1 && (
+        <div className="mt-6 flex justify-between items-center">
+          <div className="mono text-xs" style={{ color: MUTED }}>{total} · page {page}/{pages}</div>
+          <div className="flex gap-2">
+            <Button variant="outline" disabled={page <= 1} onClick={() => setPage((p) => p - 1)}
+              className="uppercase mono tracking-widest"
+              style={{ background: PANEL, borderColor: BORDER, color: LIGHT }}
+              data-testid="prev-page">Prev</Button>
+            <Button variant="outline" disabled={page >= pages} onClick={() => setPage((p) => p + 1)}
+              className="uppercase mono tracking-widest"
+              style={{ background: PANEL, borderColor: BORDER, color: LIGHT }}
+              data-testid="next-page">Next</Button>
+          </div>
+        </div>
+      )}
+    </>
   );
 }
 
@@ -593,7 +640,7 @@ function InsightsCard({ title, data }) {
             <div className="flex-1 h-1.5 rounded" style={{ background: BORDER }}>
               <div className="h-full rounded" style={{ background: GOLD, width: `${(v / total) * 100}%` }} />
             </div>
-            <div className="w-8 text-right aesthetic-serif">{v}</div>
+            <div className="w-8 text-right font-display">{v}</div>
           </div>
         ))}
       </div>
