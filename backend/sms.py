@@ -1,55 +1,43 @@
-"""SMS delivery via Twilio. Falls back to log-only when creds are absent.
-
-Trial-account safety net: TWILIO_TEST_OVERRIDE redirects every SMS to a single
-verified number (Twilio trials block un-verified destinations). The original
-recipient is prefixed onto the message body so nothing is lost.
-"""
+"""SMS delivery via Fast2SMS Quick SMS route — works for any Indian number, no DLT needed."""
 from __future__ import annotations
 import logging
 import os
-from typing import Optional
+import requests
 
 logger = logging.getLogger(__name__)
 
-
-def _creds() -> tuple[str, str, str]:
-    return (
-        os.environ.get("TWILIO_ACCOUNT_SID", ""),
-        os.environ.get("TWILIO_AUTH_TOKEN", ""),
-        os.environ.get("TWILIO_FROM", ""),
-    )
+FAST2SMS_URL = "https://www.fast2sms.com/dev/bulkV2"
 
 
-def _override() -> str:
-    return os.environ.get("TWILIO_TEST_OVERRIDE", "").strip()
+def _api_key() -> str:
+    return os.environ.get("FAST2SMS_API_KEY", "")
 
 
 def _normalize_indian(number: str) -> str:
-    """Convert a bare 10-digit Indian mobile to E.164 (+91...)."""
     n = number.strip().replace(" ", "").replace("-", "")
-    if n.startswith("+"):
-        return n
-    if len(n) == 10 and n.isdigit():
-        return f"+91{n}"
+    if n.startswith("+91"):
+        n = n[3:]
+    if n.startswith("91") and len(n) == 12:
+        n = n[2:]
     return n
 
 
 async def send_sms(to: str, message: str) -> dict:
-    sid, tok, frm = _creds()
-    if not (sid and tok and frm and to):
-        return {"sent": False, "error": "no_creds_or_recipient"}
-
-    original_to = _normalize_indian(to)
-    override = _override()
-    actual_to = override or original_to
-    if override and override != original_to:
-        message = f"[FOR {original_to}] {message}"
+    api_key = _api_key()
+    number = _normalize_indian(to)
+    if not (api_key and number):
+        return {"sent": False, "error": "no_key_or_recipient"}
 
     try:
-        from twilio.rest import Client
-        client = Client(sid, tok)
-        msg = client.messages.create(from_=frm, to=actual_to, body=message[:1500])
-        return {"sent": True, "id": msg.sid, "redirected_to": override or None}
+        resp = requests.get(FAST2SMS_URL, params={
+            "authorization": api_key,
+            "message": message[:900],
+            "language": "english",
+            "route": "q",
+            "numbers": number,
+        }, timeout=15)
+        data = resp.json()
+        return {"sent": bool(data.get("return")), "raw": data}
     except Exception as e:
-        logger.warning(f"Twilio failure: {e}")
+        logger.warning(f"Fast2SMS failure: {e}")
         return {"sent": False, "error": str(e)}
