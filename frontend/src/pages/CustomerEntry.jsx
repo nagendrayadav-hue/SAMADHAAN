@@ -14,11 +14,13 @@ export default function CustomerEntry() {
   const nav = useNavigate();
   const [tab, setTab] = useState("existing");
   const [mobile, setMobile] = useState("");
+  const [email, setEmail] = useState("");
   const [policy, setPolicy] = useState("");
   const [otp, setOtp] = useState("");
   const [otpSent, setOtpSent] = useState(false);
   const [otpVerified, setOtpVerified] = useState(false);
   const [demoOtp, setDemoOtp] = useState("");
+  const [channelStatus, setChannelStatus] = useState(null); // { sms:{delivered}, email:{delivered} }
   const [busy, setBusy] = useState(false);
 
   // Restore session on mount
@@ -26,6 +28,7 @@ export default function CustomerEntry() {
     const s = customerSession.get();
     if (!s) return;
     if (s.mobile) setMobile(s.mobile);
+    if (s.email) setEmail(s.email);
     if (s.policy) setPolicy(s.policy);
     if (s.tab) setTab(s.tab);
     if (s.otpVerified) setOtpVerified(true);
@@ -33,17 +36,23 @@ export default function CustomerEntry() {
 
   // Persist session on every field change
   useEffect(() => {
-    customerSession.patch({ mobile, policy, tab, otpVerified });
-  }, [mobile, policy, tab, otpVerified]);
+    customerSession.patch({ mobile, email, policy, tab, otpVerified });
+  }, [mobile, email, policy, tab, otpVerified]);
 
   const sendOtp = async () => {
     if (mobile.length !== 10) return toast.error("Mobile must be 10 digits");
     setBusy(true);
     try {
-      const r = await api.post("/auth/otp/send", { mobile });
+      const r = await api.post("/auth/otp/send", { mobile, email: email || null });
       setOtpSent(true);
       setDemoOtp(r.data.demo_otp || "");
-      toast.success("OTP sent to your mobile");
+      setChannelStatus({ sms: r.data.sms, email: r.data.email });
+      const smsOk = r.data.sms?.delivered;
+      const mailOk = r.data.email?.delivered;
+      if (smsOk && mailOk) toast.success("OTP sent · SMS + Email");
+      else if (smsOk) toast.success("OTP sent via SMS");
+      else if (mailOk) toast.success("OTP sent to your email (SMS failed)");
+      else toast.warning("OTP generated but neither SMS nor email confirmed — use demo code");
     } catch (e) { toast.error(e.response?.data?.detail || "Failed"); }
     setBusy(false);
   };
@@ -74,7 +83,7 @@ export default function CustomerEntry() {
 
   const forgetSession = () => {
     customerSession.clear();
-    setMobile(""); setPolicy(""); setOtp(""); setOtpSent(false); setOtpVerified(false); setDemoOtp("");
+    setMobile(""); setEmail(""); setPolicy(""); setOtp(""); setOtpSent(false); setOtpVerified(false); setDemoOtp(""); setChannelStatus(null);
     toast("Session cleared");
   };
 
@@ -136,6 +145,22 @@ export default function CustomerEntry() {
                   data-testid="mobile-input" />
               </label>
 
+              <label className="block">
+                <div className="mono text-[10px] uppercase tracking-[0.24em] mb-2 flex items-center justify-between" style={{ color: MUTED }}>
+                  <span>Email · optional</span>
+                  <span style={{ color: BLUE }}>SMS fallback</span>
+                </div>
+                <Input value={email} onChange={(e) => setEmail(e.target.value.trim())}
+                  placeholder="you@example.com"
+                  type="email"
+                  className="h-12"
+                  style={{ background: DARK, borderColor: BORDER }}
+                  data-testid="email-input" />
+                <div className="text-[11px] mt-2 mono" style={{ color: MUTED }}>
+                  If SMS doesn't reach you, the OTP is sent here in parallel.
+                </div>
+              </label>
+
               {tab === "existing" && (
                 <label className="block">
                   <div className="mono text-[10px] uppercase tracking-[0.24em] mb-2" style={{ color: MUTED }}>Policy Number · 20 digits</div>
@@ -176,6 +201,28 @@ export default function CustomerEntry() {
                       style={{ background: DARK, borderColor: BORDER }}
                       data-testid="otp-input" />
                   </label>
+
+                  {channelStatus && (
+                    <div className="grid grid-cols-2 gap-2 mono text-[10px] uppercase tracking-widest">
+                      <div className="rounded-md px-3 py-2 flex items-center justify-between"
+                           style={{ background: DARK, border: `1px solid ${BORDER}` }}
+                           data-testid="channel-sms">
+                        <span style={{ color: MUTED }}>SMS</span>
+                        <span style={{ color: channelStatus.sms?.delivered ? "#10B981" : "#F87171" }}>
+                          {channelStatus.sms?.delivered ? "delivered" : "failed"}
+                        </span>
+                      </div>
+                      <div className="rounded-md px-3 py-2 flex items-center justify-between"
+                           style={{ background: DARK, border: `1px solid ${BORDER}` }}
+                           data-testid="channel-email">
+                        <span style={{ color: MUTED }}>Email</span>
+                        <span style={{ color: channelStatus.email == null ? MUTED : channelStatus.email.delivered ? "#10B981" : "#F87171" }}>
+                          {channelStatus.email == null ? "skipped" : channelStatus.email.delivered ? "delivered" : "failed"}
+                        </span>
+                      </div>
+                    </div>
+                  )}
+
                   <Button onClick={verify} disabled={busy}
                     className="w-full h-12 uppercase mono tracking-widest font-bold"
                     style={{ background: GOLD, color: DARK }}

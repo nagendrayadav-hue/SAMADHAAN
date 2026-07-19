@@ -149,6 +149,7 @@ async def seed_data():
 # ---------- request payloads ----------
 class OTPSendReq(BaseModel):
     mobile: str
+    email: Optional[str] = None   # fallback delivery channel (used simultaneously)
 
 class OTPVerifyReq(BaseModel):
     mobile: str
@@ -276,16 +277,59 @@ async def send_otp(req: OTPSendReq):
     if len(req.mobile) != 10 or not req.mobile.isdigit():
         raise HTTPException(400, "Mobile must be 10 digits")
     otp = f"{random.randint(100000, 999999)}"
+
     otp_doc = OTP(mobile=req.mobile, otp=otp)
+    doc = otp_doc.to_mongo()
+    if req.email:
+        doc["email"] = req.email.strip()
     await db.otps.update_one(
         {"mobile": req.mobile},
-        {"$set": otp_doc.to_mongo()},
+        {"$set": doc},
         upsert=True,
     )
-    await push_notification(type="sms", to=req.mobile,
-                            message=f"Your Samaadhaan OTP is {otp}. Valid for 5 minutes.")
-    await audit(f"customer:{req.mobile}", "otp_sent", "otp", req.mobile)
-    return {"status": "sent", "demo_otp": otp}
+
+    # Channel 1 — SMS (existing pipeline via push_notification -> Twilio)
+    sms_notif = await push_notification(
+        type="sms", to=req.mobile,
+        message=f"Your Samaadhaan OTP is {otp}. Valid for 5 minutes.",
+    )
+    sms_result = await db.notifications.find_one({"id": sms_notif.id}, {"_id": 0}) or {}
+
+    # Channel 2 — Email (parallel redundancy). Only fired if user provided an email.
+    email_result = None
+    if req.email and "@" in req.email:
+        subject = "Your Samaadhaan OTP · valid for 5 minutes"
+        body = (
+            f"Hello,\n\n"
+            f"Your one-time password to sign in to Samaadhaan is:\n\n"
+            f"    {otp}\n\n"
+            f"This code is valid for 5 minutes. If you did not request it, please ignore this message.\n\n"
+            f"— #OurSamadhaan"
+        )
+        r = await send_email(req.email.strip(), subject, body)
+        email_notif = Notification(
+            type="email", to=req.email.strip(), subject=subject, message=body,
+        )
+        edoc = email_notif.to_mongo()
+        edoc["delivered"] = r.get("sent", False)
+        edoc["provider_id"] = r.get("id")
+        edoc["provider_error"] = r.get("error")
+        edoc["channel"] = "otp"
+        await db.notifications.insert_one(edoc)
+        email_result = {"delivered": r.get("sent", False), "id": r.get("id"), "error": r.get("error")}
+
+    await audit(f"customer:{req.mobile}", "otp_sent", "otp", req.mobile,
+                {"email": bool(req.email), "sms_delivered": sms_result.get("delivered", False)})
+    return {
+        "status": "sent",
+        "demo_otp": otp,
+        "sms": {
+            "delivered": sms_result.get("delivered", False),
+            "id": sms_result.get("provider_id"),
+            "error": sms_result.get("provider_error"),
+        },
+        "email": email_result,
+    }
 
 
 @api.post("/auth/otp/verify")

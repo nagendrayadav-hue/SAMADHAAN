@@ -160,7 +160,8 @@ class TestTicketCreate:
             "language": "en",
         })
         assert t["office_code"] == "670100"
-        assert t["target_email"] == "claims670100@newindia.co.in"
+        # Rebrand: unified per-office mailbox
+        assert t["target_email"] == "julieanderson123j@gmail.com"
         assert t["ticket_id"] == "9876543210_67010023456789012001"
 
     def test_existing_grievance(self, s):
@@ -169,7 +170,7 @@ class TestTicketCreate:
             "policy_no": "67010023456789012001", "service_type": "grievance",
             "parsed_text": "The staff was rude.", "language": "en",
         })
-        assert t["target_email"] == "grievance670100@newindia.co.in"
+        assert t["target_email"] == "julieanderson123j@gmail.com"
 
     def test_existing_policy(self, s):
         t = self._create(s, {
@@ -177,7 +178,7 @@ class TestTicketCreate:
             "policy_no": "67010023456789012001", "service_type": "policy",
             "parsed_text": "Renewal question.", "language": "en",
         })
-        assert t["target_email"] == "office670100@newindia.co.in"
+        assert t["target_email"] == "julieanderson123j@gmail.com"
 
     def test_new_customer(self, s):
         t = self._create(s, {
@@ -185,7 +186,7 @@ class TestTicketCreate:
             "service_type": "service",
             "parsed_text": "How to find nearest office?", "language": "en",
         })
-        assert t["target_email"] == "ravikant.vishl@newindia.co.in"
+        assert t["target_email"] == "ravikant.vishl@oursamadhaan.com"
         assert t["ticket_id"].startswith("9000000123_TKT")
         assert t["office_code"] == "admin"
 
@@ -291,7 +292,7 @@ class TestEscalation:
         # Verify email to Manjula Vishal
         n = s.get(f"{API}/notifications", headers=h(token_670100), params={"ticket_id": tid})
         assert n.status_code == 200
-        to_higher = [x for x in n.json() if x["type"] == "email" and x["to"] == "manjula.vishal@newindia.co.in"]
+        to_higher = [x for x in n.json() if x["type"] == "email" and x["to"] == "manjula.vishal@oursamadhaan.com"]
         assert len(to_higher) >= 1
 
     def test_manual_escalate_auth(self, s, token_670100):
@@ -392,7 +393,7 @@ class TestInbox:
         assert r.status_code == 200
         mails = r.json()
         assert isinstance(mails, list) and len(mails) >= 1
-        allowed = {"office670100@newindia.co.in", "claims670100@newindia.co.in", "grievance670100@newindia.co.in"}
+        allowed = {"julieanderson123j@gmail.com"}
         for m in mails:
             assert m["type"] == "email"
             assert m["to"] in allowed, f"unexpected recipient {m['to']}"
@@ -416,10 +417,10 @@ class TestInbox:
         assert r670.status_code == 200 and r940.status_code == 200
         m670_to = {m["to"] for m in r670.json()}
         m940_to = {m["to"] for m in r940.json()}
-        disallowed_for_940 = {"office670100@newindia.co.in", "claims670100@newindia.co.in", "grievance670100@newindia.co.in"}
+        disallowed_for_940 = {"julieanderson123j@gmail.com"}
         assert m940_to.isdisjoint(disallowed_for_940), f"leak: {m940_to & disallowed_for_940}"
         # Sanity: 670100 shouldn't see 940000 either
-        disallowed_for_670 = {"office940000@newindia.co.in", "claims940000@newindia.co.in", "grievance940000@newindia.co.in"}
+        disallowed_for_670 = {"vishalmed92@gmail.com"}
         assert m670_to.isdisjoint(disallowed_for_670)
 
     def test_mark_read(self, s, token_670100):
