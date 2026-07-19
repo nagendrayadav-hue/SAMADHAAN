@@ -110,3 +110,9 @@ Multi-role New India Assurance customer service portal ("Samaadhaan") with:
   - Higher-authority escalation → `manjula.vishal@oursamadhaan.com`
   - Call-center intake → `ravikant.vishl@oursamadhaan.com`
 - Tickets created for 670100/940000 policies now correctly route to the two new gmail inboxes (verified: `target_email: julieanderson123j@gmail.com` for a 670100 claim; `vishalmed92@gmail.com` for a 940000 policy request).
+
+## Update · 2026-07-17 (v2.9) — Dual-channel OTP
+- Bug fix: Twilio trial SMS not fully reliable. Added an **email redundancy** on `/api/auth/otp/send`. Request now takes optional `email`. If supplied, the OTP is dispatched simultaneously via SMS (Twilio) AND email (Resend) in parallel.
+- Response schema now includes `{sms:{delivered, id, error}, email:{delivered, id, error}}` so the UI can show per-channel status.
+- Frontend Customer entry has a new optional email field; after OTP dispatch, two live status chips indicate SMS + Email delivery independently. Toast copy adapts ("SMS + Email", "SMS only", "Email only (SMS failed)", or "generated but neither confirmed — use demo code").
+- Testing agent report (iteration_3.json): 18 new dual-channel tests + full regression pass on office login / ticket create / escalate / office email routing.
