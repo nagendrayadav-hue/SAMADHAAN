@@ -129,7 +129,9 @@ async def seed_data():
     OFFICE_MAILBOXES = {
         "670100": "julieanderson123j@gmail.com",
         "940000": "vishalmed92@gmail.com",
-        "admin":  "admin@oursamadhaan.com",
+        # Admin previously used admin@oursamadhaan.com — that domain doesn't
+        # exist (NXDOMAIN) so every email bounced. Route to a real inbox.
+        "admin":  "vishalmed92@gmail.com",
     }
     unified_offices = [
         ("670100", "Mumbai Regional Office"),
@@ -358,10 +360,18 @@ async def send_otp(req: OTPSendReq):
     await audit(f"customer:{req.mobile}", "otp_sent", "otp", req.mobile,
                 {"email": email, "email_delivered": email_result.get("sent", False),
                  "sms_opt_in": req.send_sms})
+
+    email_ok = bool(email_result.get("sent"))
+    sms_ok = bool(sms_result and sms_result.get("delivered"))
+    # Primary path (Option B): real delivery to the customer's phone / inbox.
+    # Redundancy (Option A): if BOTH real channels failed (or SMS was opt-in
+    # and failed), surface the OTP on-screen so the demo/test never dead-ends.
+    reveal_demo = (not email_ok) or (req.send_sms and not sms_ok)
     return {
         "status": "sent",
-        "demo_otp": otp,
-        "email": {"delivered": email_result.get("sent", False),
+        "demo_otp": otp if reveal_demo else None,
+        "delivery_ok": email_ok or sms_ok,
+        "email": {"delivered": email_ok,
                   "id": email_result.get("id"),
                   "error": email_result.get("error"),
                   "attempts": email_result.get("attempts", 1)},
@@ -476,16 +486,18 @@ async def create_ticket(req: TicketCreateReq):
         priority = cls["priority"]
         sentiment = cls["sentiment"]
 
-    # Resolve target email
+    # Resolve target email — every fallback lands in a real deliverable inbox
+    # so no message ever silently bounces on NXDOMAIN.
+    FALLBACK_INBOX = "vishalmed92@gmail.com"
     off = await db.offices.find_one({"code": office_code}, {"_id": 0})
     if service_type == "claims":
-        target_email = off["claims_email"] if off else "claims@oursamadhaan.com"
+        target_email = (off and off.get("claims_email")) or FALLBACK_INBOX
     elif service_type == "grievance":
-        target_email = off["grievance_email"] if off else "grievance@oursamadhaan.com"
+        target_email = (off and off.get("grievance_email")) or FALLBACK_INBOX
     elif req.customer_type == "new":
         target_email = CALL_CENTER_EMAIL
     else:
-        target_email = off["email"] if off else "office@oursamadhaan.com"
+        target_email = (off and off.get("email")) or FALLBACK_INBOX
 
     ticket_id = build_ticket_id(req.mobile, req.policy_no)
     ticket = Ticket(
@@ -974,6 +986,97 @@ async def on_stop():
     except Exception:
         pass
     mongo_client.close()
+
+# ---------- Health / self-diagnostic ----------
+BUILD_TAG = "2026-07-19_gmailsmtp_retry_slahourglass"
+
+
+@api.get("/health/version")
+async def health_version():
+    """Fingerprint the deployed code so you can spot a stale deploy in one call.
+
+    Curl this on Render vs sandbox — if `mailer_primary` differs, the code
+    hasn't been redeployed. No side effects.
+    """
+    from mailer import _gmail_creds, _resend_key  # local import to keep top clean
+    gmail_ok = all(_gmail_creds())
+    return {
+        "build": BUILD_TAG,
+        "mailer_primary": "gmail_smtp" if gmail_ok else ("resend" if _resend_key() else "none"),
+        "gmail_configured": gmail_ok,
+        "resend_configured": bool(_resend_key()),
+        "twilio_configured": bool(os.environ.get("TWILIO_ACCOUNT_SID", "").strip() and
+                                  os.environ.get("TWILIO_AUTH_TOKEN", "").strip() and
+                                  os.environ.get("TWILIO_FROM", "").strip()),
+    }
+
+
+@api.get("/health/dispatch")
+async def health_dispatch():
+    """Live canary — pings Twilio + Gmail with a *handshake only*, sends nothing.
+
+    Green means the deploy is healthy end-to-end. If either channel goes red,
+    the response tells you the exact error (Twilio code / SMTP status) so you
+    can act immediately instead of finding out after a real customer's SMS
+    silently fails.
+    """
+    import base64, urllib.request, urllib.error, ssl, smtplib
+
+    result = {"twilio": {"ok": False}, "gmail": {"ok": False}}
+
+    # --- Twilio: cheap authenticated GET of the account resource ---
+    from sms import _creds as _sms_creds
+    sid, tok, frm = _sms_creds()
+    if not (sid and tok and frm):
+        result["twilio"] = {"ok": False, "error": "not_configured"}
+    else:
+        try:
+            auth = base64.b64encode(f"{sid}:{tok}".encode()).decode()
+            req = urllib.request.Request(
+                f"https://api.twilio.com/2010-04-01/Accounts/{sid}.json",
+                headers={"Authorization": f"Basic {auth}"},
+            )
+            r = urllib.request.urlopen(req, timeout=6)
+            import json as _json
+            body = _json.loads(r.read())
+            result["twilio"] = {
+                "ok": body.get("status") == "active",
+                "account_status": body.get("status"),
+                "account_type": body.get("type"),
+                "from_number": frm,
+                "sid_length": len(sid),
+                "sid_starts_ac": sid.startswith("AC"),
+                "has_stray_whitespace": sid != sid.strip() or "\n" in sid or "\r" in sid,
+            }
+        except urllib.error.HTTPError as e:
+            result["twilio"] = {"ok": False, "error": f"twilio_http_{e.code}",
+                                 "detail": e.read()[:200].decode(errors="ignore")}
+        except Exception as e:
+            result["twilio"] = {"ok": False, "error": f"transport:{type(e).__name__}:{e}"}
+
+    # --- Gmail: STARTTLS + LOGIN + QUIT, no message sent ---
+    from mailer import _gmail_creds
+    user, pw = _gmail_creds()
+    if not (user and pw):
+        result["gmail"] = {"ok": False, "error": "not_configured"}
+    else:
+        try:
+            ctx = ssl.create_default_context()
+            with smtplib.SMTP("smtp.gmail.com", 587, timeout=8) as s:
+                s.starttls(context=ctx)
+                code, _ = s.login(user, pw)
+                s.noop()
+            result["gmail"] = {"ok": True, "auth_code": code, "user": user, "channel": "gmail_smtp"}
+        except smtplib.SMTPAuthenticationError as e:
+            result["gmail"] = {"ok": False, "error": f"auth_{e.smtp_code}",
+                               "detail": (e.smtp_error.decode() if isinstance(e.smtp_error, bytes) else str(e.smtp_error))[:200]}
+        except Exception as e:
+            result["gmail"] = {"ok": False, "error": f"{type(e).__name__}:{e}"[:220]}
+
+    result["build"] = BUILD_TAG
+    result["all_green"] = bool(result["twilio"].get("ok") and result["gmail"].get("ok"))
+    return result
+
 
 
 app.include_router(api)

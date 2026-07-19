@@ -1,23 +1,38 @@
-"""SMS delivery via Twilio. Falls back to log-only when creds are absent.
+"""SMS delivery via Twilio with one-shot retry on transient failures.
 
-Trial-account safety net: TWILIO_TEST_OVERRIDE redirects every SMS to a single
-verified number (Twilio trials block un-verified destinations). The original
-recipient is prefixed onto the message body so nothing is lost.
+Behavioural notes:
+- TWILIO_TEST_OVERRIDE (optional) forces every SMS to a single verified
+  number — used only for demo mode; leave empty in production.
+- On transient errors (network / 5xx) we retry once before giving up.
+- On terminal Twilio errors (auth, quota, geo, bad number) we surface the
+  exact Twilio error code so the operator can act.
 """
 from __future__ import annotations
+import asyncio
 import logging
 import os
 from typing import Optional
 
 logger = logging.getLogger(__name__)
 
+# Twilio errors that are worth retrying (transient / infra) — anything else is
+# a terminal user/config problem where a retry would just burn credit.
+_RETRYABLE_ERROR_CODES = {20500, 20503, 20504, 30001, 30002}
+
 
 def _creds() -> tuple[str, str, str]:
-    return (
-        os.environ.get("TWILIO_ACCOUNT_SID", ""),
-        os.environ.get("TWILIO_AUTH_TOKEN", ""),
-        os.environ.get("TWILIO_FROM", ""),
-    )
+    """Read Twilio credentials with aggressive whitespace stripping.
+
+    Render / Railway / Heroku env-var editors are notorious for silently
+    appending a trailing '\\n' when a value is pasted. That turns
+    `Accounts/AC...` into `Accounts/AC...\\n` in the URL path, which Twilio
+    reports as a 20404 "resource not found" — indistinguishable from a
+    wrong-SID error at first glance. Strip aggressively so paste artifacts
+    can never break the pipeline.
+    """
+    def clean(k: str) -> str:
+        return os.environ.get(k, "").strip().replace("\n", "").replace("\r", "").replace(" ", "")
+    return clean("TWILIO_ACCOUNT_SID"), clean("TWILIO_AUTH_TOKEN"), clean("TWILIO_FROM")
 
 
 def _override() -> str:
@@ -34,6 +49,27 @@ def _normalize_indian(number: str) -> str:
     return n
 
 
+def _try_once(sid: str, tok: str, frm: str, to: str, body: str) -> dict:
+    try:
+        from twilio.rest import Client
+        from twilio.base.exceptions import TwilioRestException
+        client = Client(sid, tok)
+        try:
+            msg = client.messages.create(from_=frm, to=to, body=body[:1500])
+            return {"sent": True, "id": msg.sid, "code": None, "status": msg.status}
+        except TwilioRestException as e:
+            # Twilio surfaces a distinct numeric error code — keep it.
+            return {
+                "sent": False,
+                "error": f"twilio:{e.code}:{e.msg}",
+                "code": e.code,
+                "http_status": e.status,
+            }
+    except Exception as e:
+        # Networking / SDK failures without a Twilio code
+        return {"sent": False, "error": f"transport:{e}", "code": None}
+
+
 async def send_sms(to: str, message: str) -> dict:
     sid, tok, frm = _creds()
     if not (sid and tok and frm and to):
@@ -45,11 +81,22 @@ async def send_sms(to: str, message: str) -> dict:
     if override and override != original_to:
         message = f"[FOR {original_to}] {message}"
 
-    try:
-        from twilio.rest import Client
-        client = Client(sid, tok)
-        msg = client.messages.create(from_=frm, to=actual_to, body=message[:1500])
-        return {"sent": True, "id": msg.sid, "redirected_to": override or None}
-    except Exception as e:
-        logger.warning(f"Twilio failure: {e}")
-        return {"sent": False, "error": str(e)}
+    for attempt in (1, 2):
+        r = _try_once(sid, tok, frm, actual_to, message)
+        if r["sent"]:
+            r["attempts"] = attempt
+            r["redirected_to"] = override or None
+            return r
+        # Only retry on transient categories: no code (network) or explicit retryable set
+        transient = r.get("code") is None or r.get("code") in _RETRYABLE_ERROR_CODES
+        logger.warning(
+            f"Twilio SMS attempt {attempt}/2 failed to {actual_to} · "
+            f"code={r.get('code')} err={r.get('error')} · "
+            f"{'retrying' if transient and attempt == 1 else 'giving up'}"
+        )
+        if not transient or attempt == 2:
+            return {**r, "attempts": attempt, "redirected_to": override or None}
+        await asyncio.sleep(0.6)
+
+    # unreachable but keeps type checkers happy
+    return {"sent": False, "error": "unknown"}
