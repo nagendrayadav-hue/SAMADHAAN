@@ -32,12 +32,14 @@ export default function CustomerEntry() {
     if (typeof s.sendSms === "boolean") setSendSms(s.sendSms);
     if (s.policy) setPolicy(s.policy);
     if (s.tab) setTab(s.tab);
-    if (s.otpVerified) setOtpVerified(true);
+    // OTP verification MUST be fresh — never restore verified state from disk.
+    setOtpVerified(false);
   }, []);
 
   useEffect(() => {
-    customerSession.patch({ mobile, email, sendSms, policy, tab, otpVerified });
-  }, [mobile, email, sendSms, policy, tab, otpVerified]);
+    // Persist form fields for a smooth refresh — but never persist the verified flag.
+    customerSession.patch({ mobile, email, sendSms, policy, tab, otpVerified: false });
+  }, [mobile, email, sendSms, policy, tab]);
 
   const emailValid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
 
@@ -76,17 +78,9 @@ export default function CustomerEntry() {
     setBusy(false);
   };
 
-  const continueVerified = () => {
-    if (tab === "existing" && policy) {
-      nav(`/customer/service?mobile=${mobile}&policy=${policy}&type=existing`);
-    } else {
-      nav(`/customer/service?mobile=${mobile}&type=new`);
-    }
-  };
-
   const forgetSession = () => {
     customerSession.clear();
-    setMobile(""); setEmail(""); setPolicy(""); setOtp(""); setOtpSent(false); setOtpVerified(false); setDemoOtp(""); setChannelStatus(null);
+    setMobile(""); setEmail(""); setSendSms(false); setPolicy(""); setOtp(""); setOtpSent(false); setOtpVerified(false); setDemoOtp(""); setChannelStatus(null);
     toast("Session cleared");
   };
 
@@ -187,14 +181,7 @@ export default function CustomerEntry() {
                 </label>
               )}
 
-              {otpVerified ? (
-                <Button onClick={continueVerified}
-                  className="w-full h-12 uppercase mono tracking-widest font-bold"
-                  style={{ background: GOLD, color: DARK }}
-                  data-testid="continue-verified-btn">
-                  Continue to service <ArrowRight className="ml-2" size={14} />
-                </Button>
-              ) : !otpSent ? (
+              {!otpSent ? (
                 <Button onClick={sendOtp} disabled={busy}
                   className="w-full h-12 uppercase mono tracking-widest font-bold"
                   style={{ background: GOLD, color: DARK }}
