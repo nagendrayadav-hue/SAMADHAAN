@@ -47,20 +47,15 @@ export default function CustomerEntry() {
     if (mobile.length !== 10) return toast.error("Mobile must be 10 digits");
     if (!emailValid) return toast.error("A valid email is required for OTP");
     setBusy(true);
-    setDeliveryPromoted(true);   // fallback is ALWAYS visible immediately — real delivery is best-effort
+    setDeliveryPromoted(true);
     try {
       const r = await api.post("/auth/otp/send", { mobile, email, send_sms: sendSms });
       setOtpSent(true);
       setDemoOtp(r.data.demo_otp || "");
       setChannelStatus({ email: r.data.email, sms: r.data.sms });
-      const eOk = r.data.email?.delivered;
-      const sOk = r.data.sms?.delivered;
-      if (eOk && sOk) toast.success("OTP dispatched · Email + SMS also sent");
-      else if (eOk) toast.success("OTP dispatched · Email also sent");
-      else if (sOk) toast.success("OTP dispatched · SMS also sent");
-      else toast("OTP ready on-screen · real-channel delivery pending", { icon: "🔐" });
+      toast.success("OTP ready · use the on-screen code or wait for SMS/email");
     } catch (e) {
-      toast.error(e.response?.data?.detail || "Backend error — check the on-screen code");
+      toast.error(e.response?.data?.detail || "Backend error");
     }
     setBusy(false);
   };
@@ -261,18 +256,16 @@ export default function CustomerEntry() {
                            style={{ background: DARK, border: `1px solid ${BORDER}` }}
                            data-testid="channel-email">
                         <span style={{ color: MUTED }}>Email</span>
-                        <span style={{ color: channelStatus.email?.delivered ? "#10B981" : "#F87171" }}>
-                          {channelStatus.email?.delivered
-                            ? `delivered · ${channelStatus.email.attempts || 1}×`
-                            : "failed"}
+                        <span style={{ color: MUTED }}>
+                          {channelStatus.email?.queued ? "queued · sending…" : (channelStatus.email?.delivered ? "delivered" : "skipped")}
                         </span>
                       </div>
                       <div className="rounded-md px-3 py-2 flex items-center justify-between"
                            style={{ background: DARK, border: `1px solid ${BORDER}` }}
                            data-testid="channel-sms">
                         <span style={{ color: MUTED }}>SMS</span>
-                        <span style={{ color: channelStatus.sms == null ? MUTED : channelStatus.sms.delivered ? "#10B981" : "#F87171" }}>
-                          {channelStatus.sms == null ? "skipped" : channelStatus.sms.delivered ? "delivered" : "failed"}
+                        <span style={{ color: MUTED }}>
+                          {channelStatus.sms?.queued ? "queued · sending…" : (channelStatus.sms?.delivered ? "delivered" : "skipped")}
                         </span>
                       </div>
                     </div>

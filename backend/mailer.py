@@ -1,19 +1,29 @@
-"""Email delivery. Uses Gmail SMTP (universal delivery) as the primary channel;
-falls back to Resend for provider tracking / analytics parity.
-
-If neither is configured or both fail, the notification is stored with
-delivered=False so the ops team can see it.
+"""Email delivery. Uses Gmail SMTP when available; falls back to Resend HTTP
+API when SMTP is blocked (Render/Railway/Fly free tiers commonly block
+outbound port 587). A process-wide circuit breaker means we detect a blocked
+SMTP path once and skip it thereafter — no more 30-second timeouts on
+every request.
 """
 from __future__ import annotations
 import logging
 import os
 import ssl
 import smtplib
+import time
 from email.message import EmailMessage
 from email.utils import make_msgid
 from typing import Optional
 
 logger = logging.getLogger(__name__)
+
+# Circuit breaker state — process-local. If SMTP fails with a network-level
+# error (host unreachable / connection refused / DNS), stop attempting it for
+# `_SMTP_CIRCUIT_COOLDOWN_SEC` seconds. Prevents 30s+ blocks on every call.
+_SMTP_CIRCUIT_COOLDOWN_SEC = 300  # 5 minutes
+_smtp_blocked_until: float = 0.0
+# Short socket timeout — if SMTP is blocked at the network layer, fail fast
+# rather than waiting for TCP handshake to give up.
+_SMTP_TIMEOUT_SEC = 5
 
 
 def _resend_key() -> str:
@@ -39,9 +49,20 @@ def _override() -> str:
 
 def _send_smtp(to: str, subject: str, text_body: str, html_body: Optional[str],
                cc: Optional[list]) -> dict:
+    """SMTP send with fast-fail and circuit breaker.
+
+    On the first network-level failure (e.g. Render blocks outbound 587),
+    trip a process-wide circuit that skips SMTP for 5 minutes — otherwise
+    every OTP request would eat a 30-second timeout.
+    """
+    global _smtp_blocked_until
     user, pw = _gmail_creds()
     if not (user and pw):
         return {"sent": False, "error": "smtp_not_configured"}
+    now = time.time()
+    if now < _smtp_blocked_until:
+        return {"sent": False,
+                "error": f"smtp_circuit_open:blocked_for_{int(_smtp_blocked_until - now)}s"}
 
     msg = EmailMessage()
     msg["From"] = f"Samaadhaan <{user}>"
@@ -54,36 +75,34 @@ def _send_smtp(to: str, subject: str, text_body: str, html_body: Optional[str],
     if html_body:
         msg.add_alternative(html_body, subtype="html")
 
-    last_err = None
-    # One-shot retry on transient SMTP failures (connection reset, 421, 4xx)
-    for attempt in (1, 2):
-        try:
-            ctx = ssl.create_default_context()
-            with smtplib.SMTP("smtp.gmail.com", 587, timeout=15) as s:
-                s.starttls(context=ctx)
-                s.login(user, pw)
-                refused = s.send_message(msg)
-            if refused:
-                # Some recipients bounced at the SMTP handshake — non-retryable
-                return {"sent": False, "error": f"smtp_refused:{refused}",
-                        "attempts": attempt}
-            return {"sent": True, "id": msg["Message-ID"],
-                    "channel": "gmail_smtp", "attempts": attempt}
-        except smtplib.SMTPAuthenticationError as e:
-            # Wrong / rotated app password — retrying won't help
-            return {"sent": False, "error": f"smtp_auth:{e.smtp_code}:{e.smtp_error!s}",
-                    "attempts": attempt}
-        except (smtplib.SMTPServerDisconnected, smtplib.SMTPConnectError,
-                TimeoutError, OSError) as e:
-            last_err = f"smtp_transient:{type(e).__name__}:{e}"
-            logger.warning(f"Gmail SMTP attempt {attempt}/2 failed: {last_err}")
-            if attempt == 2:
-                return {"sent": False, "error": last_err, "attempts": attempt}
-        except Exception as e:
-            # Unknown non-transient error — don't retry
-            logger.warning(f"Gmail SMTP failure: {e}")
-            return {"sent": False, "error": f"smtp:{e}", "attempts": attempt}
-    return {"sent": False, "error": last_err or "smtp_unknown", "attempts": 2}
+    try:
+        ctx = ssl.create_default_context()
+        with smtplib.SMTP("smtp.gmail.com", 587, timeout=_SMTP_TIMEOUT_SEC) as s:
+            s.starttls(context=ctx)
+            s.login(user, pw)
+            refused = s.send_message(msg)
+        if refused:
+            return {"sent": False, "error": f"smtp_refused:{refused}", "attempts": 1}
+        return {"sent": True, "id": msg["Message-ID"],
+                "channel": "gmail_smtp", "attempts": 1}
+    except smtplib.SMTPAuthenticationError as e:
+        return {"sent": False,
+                "error": f"smtp_auth:{e.smtp_code}:{e.smtp_error!s}",
+                "attempts": 1}
+    except (OSError, smtplib.SMTPServerDisconnected, smtplib.SMTPConnectError,
+            TimeoutError) as e:
+        # Network-level failure — trip the circuit so future calls skip SMTP.
+        _smtp_blocked_until = time.time() + _SMTP_CIRCUIT_COOLDOWN_SEC
+        logger.warning(
+            f"Gmail SMTP unreachable ({type(e).__name__}: {e}) · "
+            f"circuit tripped for {_SMTP_CIRCUIT_COOLDOWN_SEC}s — falling through to Resend"
+        )
+        return {"sent": False,
+                "error": f"smtp_network:{type(e).__name__}:{e}",
+                "attempts": 1}
+    except Exception as e:
+        logger.warning(f"Gmail SMTP failure: {e}")
+        return {"sent": False, "error": f"smtp:{e}", "attempts": 1}
 
 
 def _send_resend(to: str, subject: str, text_body: str, html_body: Optional[str],
@@ -118,7 +137,11 @@ async def send_email(to: str, subject: str, body: str, cc: Optional[list] = None
       2. Resend as a secondary / audit-trail send.
       3. Legacy TEST_EMAIL_OVERRIDE redirect ONLY when SMTP is not configured
          and Resend rejects (sandbox).
+
+    Both SMTP and Resend are synchronous blocking libraries — we dispatch
+    them via `asyncio.to_thread` so they never freeze the event loop.
     """
+    import asyncio as _asyncio
     if not to:
         return {"sent": False, "error": "no_recipient"}
 
@@ -127,14 +150,18 @@ async def send_email(to: str, subject: str, body: str, cc: Optional[list] = None
 
     if smtp_available:
         for attempt in range(retries + 1):
-            r = _send_smtp(to, subject, body, html, cc)
+            r = await _asyncio.to_thread(_send_smtp, to, subject, body, html, cc)
             if r["sent"]:
                 r["attempts"] = attempt + 1
                 return r
             last_error = r.get("error")
+            # If the circuit is open now, no point retrying SMTP this call
+            if r.get("error", "").startswith("smtp_circuit_open") or \
+               r.get("error", "").startswith("smtp_network"):
+                break
 
     # Fall back to Resend
-    r = _send_resend(to, subject, body, html, cc)
+    r = await _asyncio.to_thread(_send_resend, to, subject, body, html, cc)
     if r["sent"]:
         r["attempts"] = 1
         return r

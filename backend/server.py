@@ -333,49 +333,50 @@ async def send_otp(req: OTPSendReq):
   </table>
 </body></html>"""
 
-    email_result = await send_email(email, subject, text_body, html=html_body, retries=2)
-    email_notif = Notification(type="email", to=email, subject=subject, message=text_body)
-    edoc = email_notif.to_mongo()
-    edoc["delivered"] = email_result.get("sent", False)
-    edoc["provider_id"] = email_result.get("id")
-    edoc["provider_error"] = email_result.get("error")
-    edoc["channel"] = "otp"
-    edoc["attempts"] = email_result.get("attempts", 1)
-    await db.notifications.insert_one(edoc)
+    # Fire dispatch in the background so the API returns in <500ms regardless
+    # of Twilio / SMTP / Resend latency. The on-screen fallback OTP is always
+    # in the response, so the user is never blocked on delivery.
+    import asyncio as _asyncio
 
-    # Optional redundancy — SMS via Twilio (only when opted in)
-    sms_result = None
+    async def _dispatch_email():
+        r = await send_email(email, subject, text_body, html=html_body, retries=0)
+        n = Notification(type="email", to=email, subject=subject, message=text_body)
+        d = n.to_mongo()
+        d["delivered"] = r.get("sent", False)
+        d["provider_id"] = r.get("id")
+        d["provider_error"] = r.get("error")
+        d["channel"] = "otp"
+        d["attempts"] = r.get("attempts", 1)
+        try:
+            await db.notifications.insert_one(d)
+        except Exception as e:
+            logger.warning(f"otp email notif persist failed: {e}")
+
+    async def _dispatch_sms():
+        try:
+            await push_notification(
+                type="sms", to=req.mobile,
+                message=f"Your Samaadhaan OTP is {otp}. Valid for 5 minutes.",
+            )
+        except Exception as e:
+            logger.warning(f"otp sms dispatch failed: {e}")
+
+    _asyncio.create_task(_dispatch_email())
     if req.send_sms:
-        sms_notif = await push_notification(
-            type="sms", to=req.mobile,
-            message=f"Your Samaadhaan OTP is {otp}. Valid for 5 minutes.",
-        )
-        sms_row = await db.notifications.find_one({"id": sms_notif.id}, {"_id": 0}) or {}
-        sms_result = {
-            "delivered": sms_row.get("delivered", False),
-            "id": sms_row.get("provider_id"),
-            "error": sms_row.get("provider_error"),
-        }
+        _asyncio.create_task(_dispatch_sms())
 
     await audit(f"customer:{req.mobile}", "otp_sent", "otp", req.mobile,
-                {"email": email, "email_delivered": email_result.get("sent", False),
-                 "sms_opt_in": req.send_sms})
+                {"email": email, "sms_opt_in": req.send_sms, "dispatch": "background"})
 
-    email_ok = bool(email_result.get("sent"))
-    sms_ok = bool(sms_result and sms_result.get("delivered"))
-    # Redundancy: on-screen demo_otp is ALWAYS surfaced so a slow / failing
-    # dispatch pipeline never dead-ends the flow. The frontend displays it
-    # as a subdued "fallback" chip and promotes it to primary if the real
-    # channels don't confirm delivery within a short grace window.
+    # Redundancy: demo_otp is ALWAYS surfaced. Real channels are best-effort
+    # in the background and can be inspected later via /api/notifications.
     return {
         "status": "sent",
         "demo_otp": otp,
-        "delivery_ok": email_ok or sms_ok,
-        "email": {"delivered": email_ok,
-                  "id": email_result.get("id"),
-                  "error": email_result.get("error"),
-                  "attempts": email_result.get("attempts", 1)},
-        "sms": sms_result,
+        "delivery_ok": None,           # pending — resolves in background
+        "dispatch": "background",
+        "email": {"queued": True, "target": email},
+        "sms": {"queued": bool(req.send_sms), "target": req.mobile if req.send_sms else None},
     }
 
 
@@ -971,7 +972,7 @@ async def on_stop():
     mongo_client.close()
 
 # ---------- Health / self-diagnostic ----------
-BUILD_TAG = "2026-07-19_gmailsmtp_retry_slahourglass"
+BUILD_TAG = "2026-07-19_instant_otp_smtp_circuitbreaker"
 
 
 @api.get("/health/version")
