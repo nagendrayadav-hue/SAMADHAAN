@@ -363,13 +363,13 @@ async def send_otp(req: OTPSendReq):
 
     email_ok = bool(email_result.get("sent"))
     sms_ok = bool(sms_result and sms_result.get("delivered"))
-    # Primary path (Option B): real delivery to the customer's phone / inbox.
-    # Redundancy (Option A): if BOTH real channels failed (or SMS was opt-in
-    # and failed), surface the OTP on-screen so the demo/test never dead-ends.
-    reveal_demo = (not email_ok) or (req.send_sms and not sms_ok)
+    # Redundancy: on-screen demo_otp is ALWAYS surfaced so a slow / failing
+    # dispatch pipeline never dead-ends the flow. The frontend displays it
+    # as a subdued "fallback" chip and promotes it to primary if the real
+    # channels don't confirm delivery within a short grace window.
     return {
         "status": "sent",
-        "demo_otp": otp if reveal_demo else None,
+        "demo_otp": otp,
         "delivery_ok": email_ok or sms_ok,
         "email": {"delivered": email_ok,
                   "id": email_result.get("id"),
