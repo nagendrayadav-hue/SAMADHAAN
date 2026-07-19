@@ -52,16 +52,36 @@ def _send_smtp(to: str, subject: str, text_body: str, html_body: Optional[str],
     if html_body:
         msg.add_alternative(html_body, subtype="html")
 
-    try:
-        ctx = ssl.create_default_context()
-        with smtplib.SMTP("smtp.gmail.com", 587, timeout=15) as s:
-            s.starttls(context=ctx)
-            s.login(user, pw)
-            s.send_message(msg)
-        return {"sent": True, "id": msg["Message-ID"], "channel": "gmail_smtp"}
-    except Exception as e:
-        logger.warning(f"Gmail SMTP failure: {e}")
-        return {"sent": False, "error": f"smtp:{e}"}
+    last_err = None
+    # One-shot retry on transient SMTP failures (connection reset, 421, 4xx)
+    for attempt in (1, 2):
+        try:
+            ctx = ssl.create_default_context()
+            with smtplib.SMTP("smtp.gmail.com", 587, timeout=15) as s:
+                s.starttls(context=ctx)
+                s.login(user, pw)
+                refused = s.send_message(msg)
+            if refused:
+                # Some recipients bounced at the SMTP handshake — non-retryable
+                return {"sent": False, "error": f"smtp_refused:{refused}",
+                        "attempts": attempt}
+            return {"sent": True, "id": msg["Message-ID"],
+                    "channel": "gmail_smtp", "attempts": attempt}
+        except smtplib.SMTPAuthenticationError as e:
+            # Wrong / rotated app password — retrying won't help
+            return {"sent": False, "error": f"smtp_auth:{e.smtp_code}:{e.smtp_error!s}",
+                    "attempts": attempt}
+        except (smtplib.SMTPServerDisconnected, smtplib.SMTPConnectError,
+                TimeoutError, OSError) as e:
+            last_err = f"smtp_transient:{type(e).__name__}:{e}"
+            logger.warning(f"Gmail SMTP attempt {attempt}/2 failed: {last_err}")
+            if attempt == 2:
+                return {"sent": False, "error": last_err, "attempts": attempt}
+        except Exception as e:
+            # Unknown non-transient error — don't retry
+            logger.warning(f"Gmail SMTP failure: {e}")
+            return {"sent": False, "error": f"smtp:{e}", "attempts": attempt}
+    return {"sent": False, "error": last_err or "smtp_unknown", "attempts": 2}
 
 
 def _send_resend(to: str, subject: str, text_body: str, html_body: Optional[str],
