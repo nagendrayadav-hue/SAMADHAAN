@@ -10,7 +10,7 @@ import { toast } from "sonner";
 const DARK = "#080C14", PANEL = "#0F1626", BORDER = "#1E293B", GOLD = "#FBBF24", MUTED = "#94A3B8", LIGHT = "#F1F5F9";
 
 const APP_NAME = "Samaadhaan (#OurSamadhaan grievance portal)";
-const DEFAULT_ESCALATE_TO = "vishalmed92@gmail.com";
+const DEFAULT_ESCALATE_TO = "nagendra.yadav@gmail.com";
 const DEFAULT_ATTENTION_NAME = "Nagendra";
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 

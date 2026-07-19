@@ -21,11 +21,18 @@ _RETRYABLE_ERROR_CODES = {20500, 20503, 20504, 30001, 30002}
 
 
 def _creds() -> tuple[str, str, str]:
-    return (
-        os.environ.get("TWILIO_ACCOUNT_SID", ""),
-        os.environ.get("TWILIO_AUTH_TOKEN", ""),
-        os.environ.get("TWILIO_FROM", ""),
-    )
+    """Read Twilio credentials with aggressive whitespace stripping.
+
+    Render / Railway / Heroku env-var editors are notorious for silently
+    appending a trailing '\\n' when a value is pasted. That turns
+    `Accounts/AC...` into `Accounts/AC...\\n` in the URL path, which Twilio
+    reports as a 20404 "resource not found" — indistinguishable from a
+    wrong-SID error at first glance. Strip aggressively so paste artifacts
+    can never break the pipeline.
+    """
+    def clean(k: str) -> str:
+        return os.environ.get(k, "").strip().replace("\n", "").replace("\r", "").replace(" ", "")
+    return clean("TWILIO_ACCOUNT_SID"), clean("TWILIO_AUTH_TOKEN"), clean("TWILIO_FROM")
 
 
 def _override() -> str:

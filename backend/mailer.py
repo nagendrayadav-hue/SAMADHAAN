@@ -25,8 +25,10 @@ def _resend_sender() -> str:
 
 
 def _gmail_creds() -> tuple[str, str]:
-    user = os.environ.get("GMAIL_USER", "").strip()
-    pw = os.environ.get("GMAIL_APP_PASSWORD", "").strip().replace(" ", "")
+    """Defensive: strip whitespace + stray newlines from env vars so a
+    trailing '\\n' pasted into Render/Railway/Heroku UI can't break auth."""
+    user = os.environ.get("GMAIL_USER", "").strip().replace("\n", "").replace("\r", "")
+    pw = os.environ.get("GMAIL_APP_PASSWORD", "").strip().replace(" ", "").replace("\n", "").replace("\r", "")
     return user, pw
 
 
