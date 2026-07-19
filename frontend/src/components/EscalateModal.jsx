@@ -10,10 +10,18 @@ import { toast } from "sonner";
 const DARK = "#080C14", PANEL = "#0F1626", BORDER = "#1E293B", GOLD = "#FBBF24", MUTED = "#94A3B8", LIGHT = "#F1F5F9";
 
 const APP_NAME = "Samaadhaan (#OurSamadhaan grievance portal)";
-const MANJULA = "manjula.vishal@oursamadhaan.com";
+const DEFAULT_ESCALATE_TO = "nagendra@oursamadhaan.com";
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
-function buildBody({ customerName, caseId, adminName, priority, description, findings, businessImpact }) {
-  return `Dear Manjula,
+function nameFromEmail(email) {
+  if (!email) return "";
+  const local = email.split("@")[0] || "";
+  const first = local.split(/[.\-_+]/)[0] || "";
+  return first ? first.charAt(0).toUpperCase() + first.slice(1) : "";
+}
+
+function buildBody({ recipientName, customerName, caseId, adminName, priority, description, findings, businessImpact }) {
+  return `Dear ${recipientName || "Sir/Madam"},
 
 I would like to bring the following issue to your attention for your review and support.
 
@@ -38,6 +46,7 @@ ${adminName || "—"}`;
 }
 
 export default function EscalateModal({ open, onOpenChange, ticket, adminDefault, onEscalated }) {
+  const [recipientEmail, setRecipientEmail] = useState(DEFAULT_ESCALATE_TO);
   const [customerName, setCustomerName] = useState("");
   const [caseId, setCaseId] = useState("");
   const [adminName, setAdminName] = useState("");
@@ -47,6 +56,7 @@ export default function EscalateModal({ open, onOpenChange, ticket, adminDefault
 
   useEffect(() => {
     if (!open || !ticket) return;
+    setRecipientEmail(DEFAULT_ESCALATE_TO);
     setCustomerName(ticket.customer_name || "");
     setCaseId(ticket.ticket_id || "");
     setAdminName(adminDefault || "");
@@ -54,9 +64,14 @@ export default function EscalateModal({ open, onOpenChange, ticket, adminDefault
     setBusinessImpact("");
   }, [open, ticket, adminDefault]);
 
+  const recipientName = nameFromEmail(recipientEmail);
+
   const submit = async () => {
     if (!customerName.trim() || !caseId.trim() || !adminName.trim()) {
       return toast.error("Customer Name, Case ID and Admin Name are all required.");
+    }
+    if (!EMAIL_RE.test(recipientEmail.trim())) {
+      return toast.error("Enter a valid recipient email.");
     }
     setBusy(true);
     try {
@@ -68,10 +83,10 @@ export default function EscalateModal({ open, onOpenChange, ticket, adminDefault
       const description = ticket.parsed_text || "";
       const subject = `[Escalation] ${caseId} — ${customerName}`;
       const body = buildBody({
-        customerName, caseId, adminName, priority, description, findings, businessImpact,
+        recipientName, customerName, caseId, adminName, priority, description, findings, businessImpact,
       });
 
-      const url = `https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(MANJULA)}&su=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+      const url = `https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(recipientEmail.trim())}&su=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
       window.open(url, "_blank", "noopener");
       toast.success("Ticket escalated · Gmail compose opened.");
       onOpenChange(false);
@@ -81,7 +96,7 @@ export default function EscalateModal({ open, onOpenChange, ticket, adminDefault
 
   const preview = ticket
     ? buildBody({
-        customerName, caseId, adminName,
+        recipientName, customerName, caseId, adminName,
         priority: (ticket.priority || "normal").toUpperCase(),
         description: ticket.parsed_text,
         findings, businessImpact,
@@ -94,12 +109,23 @@ export default function EscalateModal({ open, onOpenChange, ticket, adminDefault
         style={{ background: PANEL, border: `1px solid ${BORDER}`, color: LIGHT }}>
         <DialogHeader>
           <DialogTitle className="font-display text-3xl flex items-center gap-2" style={{ color: LIGHT }}>
-            <AlertTriangle size={20} style={{ color: "#F87171" }} /> Escalate to Manjula Vishal
+            <AlertTriangle size={20} style={{ color: "#F87171" }} /> Escalate ticket
           </DialogTitle>
         </DialogHeader>
 
-        <div className="mono text-[11px] uppercase tracking-widest" style={{ color: MUTED }}>
-          To: {MANJULA} · Ticket status will be marked Escalated on submit.
+        <div className="mt-2">
+          <div className="mono text-[10px] uppercase tracking-widest mb-1" style={{ color: MUTED }}>Escalate to (email) *</div>
+          <Input
+            value={recipientEmail}
+            onChange={(e) => setRecipientEmail(e.target.value)}
+            placeholder="nagendra@oursamadhaan.com"
+            className="mono h-10"
+            style={{ background: DARK, borderColor: BORDER }}
+            data-testid="esc-recipient"
+          />
+          <div className="mono text-[10px] mt-1" style={{ color: MUTED }}>
+            Default is Nagendra · edit to send to any authority. Ticket status will be marked Escalated on submit.
+          </div>
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mt-4">
