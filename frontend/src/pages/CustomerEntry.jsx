@@ -23,6 +23,7 @@ export default function CustomerEntry() {
   const [demoOtp, setDemoOtp] = useState("");
   const [channelStatus, setChannelStatus] = useState(null);
   const [busy, setBusy] = useState(false);
+  const [deliveryPromoted, setDeliveryPromoted] = useState(false); // true after grace window expires w/o confirmed delivery
 
   useEffect(() => {
     const s = customerSession.get();
@@ -46,6 +47,11 @@ export default function CustomerEntry() {
     if (mobile.length !== 10) return toast.error("Mobile must be 10 digits");
     if (!emailValid) return toast.error("A valid email is required for OTP");
     setBusy(true);
+    setDeliveryPromoted(false);
+    // Grace window — 6 seconds. If real delivery isn't confirmed by then,
+    // promote the on-screen fallback code to primary so the user is never
+    // stuck waiting on a stalled Twilio/SMTP pipeline.
+    const promoteTimer = setTimeout(() => setDeliveryPromoted(true), 6000);
     try {
       const r = await api.post("/auth/otp/send", { mobile, email, send_sms: sendSms });
       setOtpSent(true);
@@ -53,11 +59,23 @@ export default function CustomerEntry() {
       setChannelStatus({ email: r.data.email, sms: r.data.sms });
       const eOk = r.data.email?.delivered;
       const sOk = r.data.sms?.delivered;
+      const anyOk = eOk || sOk;
+      if (anyOk) {
+        clearTimeout(promoteTimer);           // real delivery — no need to promote
+        setDeliveryPromoted(false);
+      } else {
+        clearTimeout(promoteTimer);
+        setDeliveryPromoted(true);            // failed → surface fallback immediately
+      }
       if (eOk && sOk) toast.success("OTP dispatched · Email + SMS");
       else if (eOk) toast.success("OTP dispatched to your email");
-      else if (sOk) toast.success("OTP dispatched via SMS (email failed — retry)");
-      else toast.warning("Delivery uncertain — use the demo code below");
-    } catch (e) { toast.error(e.response?.data?.detail || "Failed"); }
+      else if (sOk) toast.success("OTP dispatched via SMS");
+      else toast.warning("Real delivery failed — use the on-screen fallback code");
+    } catch (e) {
+      clearTimeout(promoteTimer);
+      setDeliveryPromoted(true);
+      toast.error(e.response?.data?.detail || "Failed — use the on-screen fallback if available");
+    }
     setBusy(false);
   };
 
@@ -204,9 +222,55 @@ export default function CustomerEntry() {
                 </Button>
               ) : (
                 <>
+                  {demoOtp && (
+                    deliveryPromoted ? (
+                      // PROMOTED — delivery failed or timed out. Prominent alert.
+                      <div
+                        className="rounded-xl px-4 py-3 flex items-center justify-between gap-3"
+                        style={{
+                          background: "rgba(251,191,36,0.08)",
+                          border: `1px solid ${GOLD}`,
+                          boxShadow: `0 0 0 3px rgba(251,191,36,0.08)`,
+                        }}
+                        data-testid="fallback-otp-promoted"
+                      >
+                        <div className="flex-1 min-w-0">
+                          <div className="mono text-[10px] uppercase tracking-[0.24em]" style={{ color: GOLD }}>
+                            Fallback code · use this to continue
+                          </div>
+                          <div className="mono text-3xl font-bold tracking-[0.4em] mt-1" style={{ color: GOLD }}>
+                            {demoOtp}
+                          </div>
+                          <div className="mono text-[10px] mt-1" style={{ color: MUTED }}>
+                            SMS/email delivery didn't confirm in time — this on-screen code is your redundancy.
+                          </div>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => { setOtp(demoOtp); }}
+                          className="mono text-[10px] uppercase tracking-widest px-3 py-2 rounded-md font-bold shrink-0"
+                          style={{ background: GOLD, color: DARK }}
+                          data-testid="fill-fallback-btn"
+                        >
+                          Fill in
+                        </button>
+                      </div>
+                    ) : (
+                      // SUBDUED — real delivery may still land. Small chip.
+                      <div
+                        className="rounded-md px-3 py-2 mono text-[10px] uppercase tracking-widest flex items-center justify-between"
+                        style={{ background: DARK, border: `1px dashed ${BORDER}`, color: MUTED }}
+                        data-testid="fallback-otp-subdued"
+                      >
+                        <span>Fallback ready (revealed if delivery stalls)</span>
+                        <span style={{ color: GOLD }}>●●●●●●</span>
+                      </div>
+                    )
+                  )}
+
                   <label className="block">
                     <div className="mono text-[10px] uppercase tracking-[0.24em] mb-2 flex items-center gap-2" style={{ color: MUTED }}>
-                      OTP {demoOtp && <span style={{ color: GOLD }}>· demo: {demoOtp}</span>}
+                      Enter OTP
                     </div>
                     <Input value={otp} onChange={(e) => setOtp(e.target.value.replace(/\D/g, "").slice(0, 6))}
                       placeholder="6-digit OTP"
