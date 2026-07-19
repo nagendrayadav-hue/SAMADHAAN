@@ -99,3 +99,14 @@ Multi-role New India Assurance customer service portal ("Samaadhaan") with:
 - **Hero KPI strip**: taller gradient card at the top of the office dashboard with 5 big-figures (Total, Pending, In progress, Resolved, Avg SLA) plus a live-polling indicator.
 - **Tickets grouped by lifecycle**: the single Tickets tab was replaced with three clear buckets — **Pending** (Open + Escalated), **In Progress**, **Resolved** — each with the shared search + service filter + priority chips + pagination. Prior state (tab / filters) still persists across refresh.
 - **Escalate flow**: clicking Escalate now opens a modal collecting `Customer Name · Case ID · Admin Name` (+ optional findings & business impact). On submit the ticket is marked Escalated on the backend AND a new Gmail compose window is opened, pre-filled to `manjula.vishal@newindia.co.in` with the exact template you provided (Dear Manjula → Issue Summary → Current Status → Business Impact → Support Required → Thanks & Regards).
+
+## Update · 2026-07-17 (v2.8) — Rebrand to #OurSamadhaan
+- **All mentions of "New India" / "New India Assurance" removed** across backend + frontend. Company signature in every AI/official email template now reads **#OurSamadhaan**. Footer, tooltips, hero copy, escalation flow, ticket-creation email all updated.
+- **Office mailboxes replaced with real gmail addresses**:
+  - `670100` → `julieanderson123j@gmail.com`
+  - `940000` → `vishalmed92@gmail.com`
+  - `admin` → `admin@oursamadhaan.com`
+- **System addresses re-branded**:
+  - Higher-authority escalation → `manjula.vishal@oursamadhaan.com`
+  - Call-center intake → `ravikant.vishl@oursamadhaan.com`
+- Tickets created for 670100/940000 policies now correctly route to the two new gmail inboxes (verified: `target_email: julieanderson123j@gmail.com` for a 670100 claim; `vishalmed92@gmail.com` for a 940000 policy request).

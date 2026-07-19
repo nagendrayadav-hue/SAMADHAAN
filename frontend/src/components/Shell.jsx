@@ -46,7 +46,7 @@ export default function Shell({ children, back = false, right = null }) {
       <footer style={{ borderTop: "1px solid #1E293B", background: "rgba(15,22,38,0.3)" }}>
         <div className="max-w-7xl mx-auto px-6 py-4 text-center text-[10px] uppercase mono tracking-[0.28em]"
              style={{ color: "#475569" }}>
-          Samadhaan · Strategic Redressal &amp; Dispatch Routing · New India Assurance · Escalations → manjula.vishal@newindia.co.in
+          Samadhaan · Strategic Redressal &amp; Dispatch Routing · #OurSamadhaan · Escalations → manjula.vishal@oursamadhaan.com
         </div>
       </footer>
     </div>

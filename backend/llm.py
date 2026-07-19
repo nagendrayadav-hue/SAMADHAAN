@@ -103,7 +103,7 @@ async def draft_office_solution(concern: str, service_type: str) -> str:
     if not concern.strip():
         return ""
     system = (
-        f"You are a senior officer at New India Assurance handling {service_type}. Draft a helpful, factual "
+        f"You are a senior officer at #OurSamadhaan handling {service_type}. Draft a helpful, factual "
         "reply outlining the steps you will take for the customer, in 120-180 words. Do not include greetings or "
         "signatures. Do not promise unrealistic timelines. Use plain English."
     )

@@ -1,4 +1,4 @@
-"""Samaadhaan API — New India Assurance grievance portal.
+"""Samaadhaan API — #OurSamadhaan grievance portal.
 
 Enhancements over v1:
   - Structured models (BaseDocument, PyObjectId pattern)
@@ -124,14 +124,20 @@ async def seed_data():
         ]:
             await db.policies.insert_one(p.to_mongo())
 
-    # Unified mailbox format: nia.{code}@newindia.co.in for policy/claims/grievance/general.
+    # Unified mailbox per office code. Real gmail addresses are used for
+    # regional partitions so demo deliveries actually land in a mailbox.
+    OFFICE_MAILBOXES = {
+        "670100": "julieanderson123j@gmail.com",
+        "940000": "vishalmed92@gmail.com",
+        "admin":  "admin@oursamadhaan.com",
+    }
     unified_offices = [
         ("670100", "Mumbai Regional Office"),
         ("940000", "Delhi Regional Office"),
         ("admin", "Admin (All Offices)"),
     ]
     for code, name in unified_offices:
-        mailbox = f"nia.{code}@newindia.co.in"
+        mailbox = OFFICE_MAILBOXES[code]
         await db.offices.update_one(
             {"code": code},
             {"$set": {"email": mailbox, "claims_email": mailbox, "grievance_email": mailbox, "name": name},
@@ -218,7 +224,7 @@ async def draft_email(req: AIEmailReq):
         signer_name = req.signer_name or (off.get("name") if off else "Office")
         signer_designation = req.signer_designation or chief_designation(t["service_type"])
         department = department_for(t["service_type"])
-        company = "New India Assurance"
+        company = "#OurSamadhaan"
 
     body = OFFICIAL_TEMPLATE.format(
         team=team,
@@ -375,13 +381,13 @@ async def create_ticket(req: TicketCreateReq):
     # Resolve target email
     off = await db.offices.find_one({"code": office_code}, {"_id": 0})
     if service_type == "claims":
-        target_email = off["claims_email"] if off else "claims@newindia.co.in"
+        target_email = off["claims_email"] if off else "claims@oursamadhaan.com"
     elif service_type == "grievance":
-        target_email = off["grievance_email"] if off else "grievance@newindia.co.in"
+        target_email = off["grievance_email"] if off else "grievance@oursamadhaan.com"
     elif req.customer_type == "new":
         target_email = CALL_CENTER_EMAIL
     else:
-        target_email = off["email"] if off else "office@newindia.co.in"
+        target_email = off["email"] if off else "office@oursamadhaan.com"
 
     ticket_id = build_ticket_id(req.mobile, req.policy_no)
     ticket = Ticket(
@@ -407,7 +413,7 @@ async def create_ticket(req: TicketCreateReq):
         signer_name="Samaadhaan Bot",
         signer_designation="Automated Intake",
         department="Customer Dispatch Cell",
-        company="New India Assurance",
+        company="#OurSamadhaan",
     )
     await push_notification(
         type="email", to=target_email,
@@ -416,7 +422,7 @@ async def create_ticket(req: TicketCreateReq):
     await push_notification(
         type="sms", to=req.mobile,
         message=(
-            f"Your issue has been escalated. Ticket: {ticket_id}. Someone from New India will call you shortly."
+            f"Your issue has been escalated. Ticket: {ticket_id}. Someone from #OurSamadhaan will call you shortly."
             if req.customer_type == "new"
             else f"Issue reported. Ticket: {ticket_id}. Concerned office will respond within 24 hours."
         ),
@@ -569,7 +575,7 @@ async def escalate_ticket(ticket_pk: str, payload: Optional[dict] = None, _actor
     """Escalate manually or from scheduler.
 
     Auto-sends a contextual, AI-drafted email through Resend directly to
-    manjula.vishal@newindia.co.in (CC: office). No SMS is triggered.
+    manjula.vishal@oursamadhaan.com (CC: office). No SMS is triggered.
     """
     t = await db.tickets.find_one({"id": ticket_pk}, {"_id": 0})
     if not t:
@@ -640,7 +646,7 @@ async def escalate_ticket(ticket_pk: str, payload: Optional[dict] = None, _actor
         signer_name="Samaadhaan Automated Escalation",
         signer_designation="24h SLA Watchdog",
         department="Grievance Cell",
-        company="New India Assurance",
+        company="#OurSamadhaan",
     )
 
     # Auto-deliver through Resend, straight to Manjula (no override).

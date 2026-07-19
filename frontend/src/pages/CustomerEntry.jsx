@@ -85,7 +85,7 @@ export default function CustomerEntry() {
           <div className="mono text-[10px] uppercase tracking-[0.28em]" style={{ color: GOLD }}>Node 01 · Customer Verification</div>
           <h2 className="aesthetic-serif text-5xl leading-[0.98] mt-4">Identity handshake.</h2>
           <p className="mt-5 max-w-sm text-sm leading-relaxed" style={{ color: MUTED }}>
-            Existing customers verify policy. New callers only need a mobile number — we forward you to the customer care center at ravikant.vishl@newindia.co.in.
+            Existing customers verify policy. New callers only need a mobile number — we forward you to the customer care center at ravikant.vishl@oursamadhaan.com.
           </p>
 
           <div className="mt-8 inline-flex gap-1 rounded-xl p-1" style={{ background: PANEL, border: `1px solid ${BORDER}` }}>
