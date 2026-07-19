@@ -82,7 +82,9 @@ async def send_sms(to: str, message: str) -> dict:
         message = f"[FOR {original_to}] {message}"
 
     for attempt in (1, 2):
-        r = _try_once(sid, tok, frm, actual_to, message)
+        # Twilio SDK is sync-blocking — run in a thread so we don't freeze
+        # the event loop.
+        r = await asyncio.to_thread(_try_once, sid, tok, frm, actual_to, message)
         if r["sent"]:
             r["attempts"] = attempt
             r["redirected_to"] = override or None
