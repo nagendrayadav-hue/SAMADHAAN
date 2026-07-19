@@ -129,7 +129,9 @@ async def seed_data():
     OFFICE_MAILBOXES = {
         "670100": "julieanderson123j@gmail.com",
         "940000": "vishalmed92@gmail.com",
-        "admin":  "admin@oursamadhaan.com",
+        # Admin previously used admin@oursamadhaan.com — that domain doesn't
+        # exist (NXDOMAIN) so every email bounced. Route to a real inbox.
+        "admin":  "vishalmed92@gmail.com",
     }
     unified_offices = [
         ("670100", "Mumbai Regional Office"),
@@ -358,10 +360,18 @@ async def send_otp(req: OTPSendReq):
     await audit(f"customer:{req.mobile}", "otp_sent", "otp", req.mobile,
                 {"email": email, "email_delivered": email_result.get("sent", False),
                  "sms_opt_in": req.send_sms})
+
+    email_ok = bool(email_result.get("sent"))
+    sms_ok = bool(sms_result and sms_result.get("delivered"))
+    # Primary path (Option B): real delivery to the customer's phone / inbox.
+    # Redundancy (Option A): if BOTH real channels failed (or SMS was opt-in
+    # and failed), surface the OTP on-screen so the demo/test never dead-ends.
+    reveal_demo = (not email_ok) or (req.send_sms and not sms_ok)
     return {
         "status": "sent",
-        "demo_otp": otp,
-        "email": {"delivered": email_result.get("sent", False),
+        "demo_otp": otp if reveal_demo else None,
+        "delivery_ok": email_ok or sms_ok,
+        "email": {"delivered": email_ok,
                   "id": email_result.get("id"),
                   "error": email_result.get("error"),
                   "attempts": email_result.get("attempts", 1)},
@@ -459,16 +469,18 @@ async def create_ticket(req: TicketCreateReq):
         priority = cls["priority"]
         sentiment = cls["sentiment"]
 
-    # Resolve target email
+    # Resolve target email — every fallback lands in a real deliverable inbox
+    # so no message ever silently bounces on NXDOMAIN.
+    FALLBACK_INBOX = "vishalmed92@gmail.com"
     off = await db.offices.find_one({"code": office_code}, {"_id": 0})
     if service_type == "claims":
-        target_email = off["claims_email"] if off else "claims@oursamadhaan.com"
+        target_email = (off and off.get("claims_email")) or FALLBACK_INBOX
     elif service_type == "grievance":
-        target_email = off["grievance_email"] if off else "grievance@oursamadhaan.com"
+        target_email = (off and off.get("grievance_email")) or FALLBACK_INBOX
     elif req.customer_type == "new":
         target_email = CALL_CENTER_EMAIL
     else:
-        target_email = off["email"] if off else "office@oursamadhaan.com"
+        target_email = (off and off.get("email")) or FALLBACK_INBOX
 
     ticket_id = build_ticket_id(req.mobile, req.policy_no)
     ticket = Ticket(

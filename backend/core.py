@@ -86,5 +86,9 @@ LANG_MAP = {
     "pa": "Punjabi", "en": "English",
 }
 
-HIGHER_AUTHORITY_EMAIL = "manjula.vishal@oursamadhaan.com"
-CALL_CENTER_EMAIL = "ravikant.vishl@oursamadhaan.com"
+# Fictitious @oursamadhaan.com addresses caused Gmail "Delivery uncertain"
+# bounces (NXDOMAIN). Both escalation and call-center notifications are routed
+# to a real, operator-owned inbox so every dispatched email is guaranteed to
+# land somewhere reviewable.
+HIGHER_AUTHORITY_EMAIL = os.environ.get("HIGHER_AUTHORITY_EMAIL", "vishalmed92@gmail.com")
+CALL_CENTER_EMAIL = os.environ.get("CALL_CENTER_EMAIL", "vishalmed92@gmail.com")
