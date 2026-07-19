@@ -87,4 +87,4 @@ LANG_MAP = {
 }
 
 HIGHER_AUTHORITY_EMAIL = "manjula.vishal@newindia.co.in"
-CALL_CENTER_EMAIL = "ravikant.vishl@newindia.co.in"
+CALL_CENTER_EMAIL = "ravikant.vishal@newindia.co.in"
