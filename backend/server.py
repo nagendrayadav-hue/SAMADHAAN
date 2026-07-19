@@ -149,7 +149,8 @@ async def seed_data():
 # ---------- request payloads ----------
 class OTPSendReq(BaseModel):
     mobile: str
-    email: Optional[str] = None   # fallback delivery channel (used simultaneously)
+    email: str                        # now REQUIRED — primary OTP channel
+    send_sms: bool = False            # SMS is optional, opt-in for redundancy
 
 class OTPVerifyReq(BaseModel):
     mobile: str
@@ -276,59 +277,90 @@ async def draft_email(req: AIEmailReq):
 async def send_otp(req: OTPSendReq):
     if len(req.mobile) != 10 or not req.mobile.isdigit():
         raise HTTPException(400, "Mobile must be 10 digits")
+    email = (req.email or "").strip()
+    if not email or "@" not in email or "." not in email.split("@")[-1]:
+        raise HTTPException(400, "A valid email is required")
     otp = f"{random.randint(100000, 999999)}"
 
-    otp_doc = OTP(mobile=req.mobile, otp=otp)
-    doc = otp_doc.to_mongo()
-    if req.email:
-        doc["email"] = req.email.strip()
+    otp_doc = OTP(mobile=req.mobile, otp=otp, email=email)
     await db.otps.update_one(
         {"mobile": req.mobile},
-        {"$set": doc},
+        {"$set": otp_doc.to_mongo()},
         upsert=True,
     )
 
-    # Channel 1 — SMS (existing pipeline via push_notification -> Twilio)
-    sms_notif = await push_notification(
-        type="sms", to=req.mobile,
-        message=f"Your Samaadhaan OTP is {otp}. Valid for 5 minutes.",
+    # Primary channel — Email (reinforced: HTML + retry + branded)
+    subject = "Your Samaadhaan OTP · valid for 5 minutes"
+    text_body = (
+        f"Hello,\n\n"
+        f"Your one-time password to sign in to Samaadhaan is:\n\n"
+        f"    {otp}\n\n"
+        f"This code is valid for 5 minutes. If you did not request it, please ignore this message.\n\n"
+        f"— #OurSamadhaan"
     )
-    sms_result = await db.notifications.find_one({"id": sms_notif.id}, {"_id": 0}) or {}
+    html_body = f"""<!doctype html>
+<html><body style="margin:0;padding:0;background:#080C14;font-family:Geist,Segoe UI,Arial,sans-serif;color:#F1F5F9">
+  <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="padding:32px 16px;background:#080C14">
+    <tr><td align="center">
+      <table role="presentation" cellpadding="0" cellspacing="0" width="480" style="max-width:480px;background:#0F1626;border:1px solid #1E293B;border-radius:16px;padding:32px">
+        <tr><td>
+          <div style="display:inline-block;background:#FBBF24;color:#080C14;font-weight:800;font-size:16px;padding:4px 10px;border-radius:6px;letter-spacing:-0.5px">S</div>
+          <div style="font-size:12px;text-transform:uppercase;letter-spacing:0.24em;color:#94A3B8;margin-top:16px">Verification code</div>
+          <h1 style="font-family:'Dela Gothic One',Georgia,serif;color:#F1F5F9;font-size:36px;margin:8px 0 24px 0;letter-spacing:-0.02em">Sign in to Samaadhaan.</h1>
+          <p style="color:#94A3B8;font-size:14px;line-height:1.6;margin:0 0 24px 0">
+            Enter this 6-digit code on the verification screen. It's valid for the next <b style="color:#F1F5F9">5 minutes</b>.
+          </p>
+          <div style="background:#080C14;border:1px solid #1E293B;border-radius:12px;padding:24px;text-align:center;font-family:'Geist Mono',ui-monospace,monospace;font-size:34px;letter-spacing:14px;color:#FBBF24;font-weight:700">
+            {otp}
+          </div>
+          <p style="color:#94A3B8;font-size:12px;line-height:1.6;margin:24px 0 0 0">
+            If you didn't request this, no action is needed — the code expires automatically.
+          </p>
+          <hr style="border:none;border-top:1px solid #1E293B;margin:24px 0"/>
+          <p style="color:#475569;font-size:11px;text-transform:uppercase;letter-spacing:0.22em;margin:0;font-family:'Geist Mono',ui-monospace,monospace">
+            #OurSamadhaan · Grievance Redressal Portal
+          </p>
+        </td></tr>
+      </table>
+    </td></tr>
+  </table>
+</body></html>"""
 
-    # Channel 2 — Email (parallel redundancy). Only fired if user provided an email.
-    email_result = None
-    if req.email and "@" in req.email:
-        subject = "Your Samaadhaan OTP · valid for 5 minutes"
-        body = (
-            f"Hello,\n\n"
-            f"Your one-time password to sign in to Samaadhaan is:\n\n"
-            f"    {otp}\n\n"
-            f"This code is valid for 5 minutes. If you did not request it, please ignore this message.\n\n"
-            f"— #OurSamadhaan"
+    email_result = await send_email(email, subject, text_body, html=html_body, retries=2)
+    email_notif = Notification(type="email", to=email, subject=subject, message=text_body)
+    edoc = email_notif.to_mongo()
+    edoc["delivered"] = email_result.get("sent", False)
+    edoc["provider_id"] = email_result.get("id")
+    edoc["provider_error"] = email_result.get("error")
+    edoc["channel"] = "otp"
+    edoc["attempts"] = email_result.get("attempts", 1)
+    await db.notifications.insert_one(edoc)
+
+    # Optional redundancy — SMS via Twilio (only when opted in)
+    sms_result = None
+    if req.send_sms:
+        sms_notif = await push_notification(
+            type="sms", to=req.mobile,
+            message=f"Your Samaadhaan OTP is {otp}. Valid for 5 minutes.",
         )
-        r = await send_email(req.email.strip(), subject, body)
-        email_notif = Notification(
-            type="email", to=req.email.strip(), subject=subject, message=body,
-        )
-        edoc = email_notif.to_mongo()
-        edoc["delivered"] = r.get("sent", False)
-        edoc["provider_id"] = r.get("id")
-        edoc["provider_error"] = r.get("error")
-        edoc["channel"] = "otp"
-        await db.notifications.insert_one(edoc)
-        email_result = {"delivered": r.get("sent", False), "id": r.get("id"), "error": r.get("error")}
+        sms_row = await db.notifications.find_one({"id": sms_notif.id}, {"_id": 0}) or {}
+        sms_result = {
+            "delivered": sms_row.get("delivered", False),
+            "id": sms_row.get("provider_id"),
+            "error": sms_row.get("provider_error"),
+        }
 
     await audit(f"customer:{req.mobile}", "otp_sent", "otp", req.mobile,
-                {"email": bool(req.email), "sms_delivered": sms_result.get("delivered", False)})
+                {"email": email, "email_delivered": email_result.get("sent", False),
+                 "sms_opt_in": req.send_sms})
     return {
         "status": "sent",
         "demo_otp": otp,
-        "sms": {
-            "delivered": sms_result.get("delivered", False),
-            "id": sms_result.get("provider_id"),
-            "error": sms_result.get("provider_error"),
-        },
-        "email": email_result,
+        "email": {"delivered": email_result.get("sent", False),
+                  "id": email_result.get("id"),
+                  "error": email_result.get("error"),
+                  "attempts": email_result.get("attempts", 1)},
+        "sms": sms_result,
     }
 
 

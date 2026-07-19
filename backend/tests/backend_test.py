@@ -62,7 +62,8 @@ def test_health(s):
 class TestOTP:
     def test_send_and_verify_ok(self, s):
         mob = f"98{random.randint(10000000, 99999999)}"
-        r = s.post(f"{API}/auth/otp/send", json={"mobile": mob})
+        # email is now required (iteration_4 change)
+        r = s.post(f"{API}/auth/otp/send", json={"mobile": mob, "email": "regression@example.com"})
         assert r.status_code == 200, r.text
         otp = r.json()["demo_otp"]
         assert isinstance(otp, str) and len(otp) == 6
@@ -72,15 +73,15 @@ class TestOTP:
 
     def test_verify_wrong(self, s):
         mob = f"97{random.randint(10000000, 99999999)}"
-        r = s.post(f"{API}/auth/otp/send", json={"mobile": mob})
+        r = s.post(f"{API}/auth/otp/send", json={"mobile": mob, "email": "regression@example.com"})
         assert r.status_code == 200
         r2 = s.post(f"{API}/auth/otp/verify", json={"mobile": mob, "otp": "000000"})
         assert r2.status_code == 401
 
     def test_invalid_mobile(self, s):
-        r = s.post(f"{API}/auth/otp/send", json={"mobile": "12345"})
+        r = s.post(f"{API}/auth/otp/send", json={"mobile": "12345", "email": "regression@example.com"})
         assert r.status_code == 400
-        r2 = s.post(f"{API}/auth/otp/send", json={"mobile": "abcdefghij"})
+        r2 = s.post(f"{API}/auth/otp/send", json={"mobile": "abcdefghij", "email": "regression@example.com"})
         assert r2.status_code == 400
 
 

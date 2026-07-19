@@ -15,44 +15,47 @@ export default function CustomerEntry() {
   const [tab, setTab] = useState("existing");
   const [mobile, setMobile] = useState("");
   const [email, setEmail] = useState("");
+  const [sendSms, setSendSms] = useState(false);   // SMS is opt-in
   const [policy, setPolicy] = useState("");
   const [otp, setOtp] = useState("");
   const [otpSent, setOtpSent] = useState(false);
   const [otpVerified, setOtpVerified] = useState(false);
   const [demoOtp, setDemoOtp] = useState("");
-  const [channelStatus, setChannelStatus] = useState(null); // { sms:{delivered}, email:{delivered} }
+  const [channelStatus, setChannelStatus] = useState(null);
   const [busy, setBusy] = useState(false);
 
-  // Restore session on mount
   useEffect(() => {
     const s = customerSession.get();
     if (!s) return;
     if (s.mobile) setMobile(s.mobile);
     if (s.email) setEmail(s.email);
+    if (typeof s.sendSms === "boolean") setSendSms(s.sendSms);
     if (s.policy) setPolicy(s.policy);
     if (s.tab) setTab(s.tab);
     if (s.otpVerified) setOtpVerified(true);
   }, []);
 
-  // Persist session on every field change
   useEffect(() => {
-    customerSession.patch({ mobile, email, policy, tab, otpVerified });
-  }, [mobile, email, policy, tab, otpVerified]);
+    customerSession.patch({ mobile, email, sendSms, policy, tab, otpVerified });
+  }, [mobile, email, sendSms, policy, tab, otpVerified]);
+
+  const emailValid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
 
   const sendOtp = async () => {
     if (mobile.length !== 10) return toast.error("Mobile must be 10 digits");
+    if (!emailValid) return toast.error("A valid email is required for OTP");
     setBusy(true);
     try {
-      const r = await api.post("/auth/otp/send", { mobile, email: email || null });
+      const r = await api.post("/auth/otp/send", { mobile, email, send_sms: sendSms });
       setOtpSent(true);
       setDemoOtp(r.data.demo_otp || "");
-      setChannelStatus({ sms: r.data.sms, email: r.data.email });
-      const smsOk = r.data.sms?.delivered;
-      const mailOk = r.data.email?.delivered;
-      if (smsOk && mailOk) toast.success("OTP sent · SMS + Email");
-      else if (smsOk) toast.success("OTP sent via SMS");
-      else if (mailOk) toast.success("OTP sent to your email (SMS failed)");
-      else toast.warning("OTP generated but neither SMS nor email confirmed — use demo code");
+      setChannelStatus({ email: r.data.email, sms: r.data.sms });
+      const eOk = r.data.email?.delivered;
+      const sOk = r.data.sms?.delivered;
+      if (eOk && sOk) toast.success("OTP dispatched · Email + SMS");
+      else if (eOk) toast.success("OTP dispatched to your email");
+      else if (sOk) toast.success("OTP dispatched via SMS (email failed — retry)");
+      else toast.warning("Delivery uncertain — use the demo code below");
     } catch (e) { toast.error(e.response?.data?.detail || "Failed"); }
     setBusy(false);
   };
@@ -137,18 +140,9 @@ export default function CustomerEntry() {
 
             <div className="space-y-5">
               <label className="block">
-                <div className="mono text-[10px] uppercase tracking-[0.24em] mb-2" style={{ color: MUTED }}>Mobile Number</div>
-                <Input value={mobile} onChange={(e) => setMobile(e.target.value.replace(/\D/g, "").slice(0, 10))}
-                  placeholder="10-digit mobile"
-                  className="mono text-lg h-12"
-                  style={{ background: DARK, borderColor: BORDER }}
-                  data-testid="mobile-input" />
-              </label>
-
-              <label className="block">
                 <div className="mono text-[10px] uppercase tracking-[0.24em] mb-2 flex items-center justify-between" style={{ color: MUTED }}>
-                  <span>Email · optional</span>
-                  <span style={{ color: BLUE }}>SMS fallback</span>
+                  <span>Email address <span style={{ color: "#F87171" }}>*</span></span>
+                  <span style={{ color: GOLD }}>primary channel</span>
                 </div>
                 <Input value={email} onChange={(e) => setEmail(e.target.value.trim())}
                   placeholder="you@example.com"
@@ -157,8 +151,26 @@ export default function CustomerEntry() {
                   style={{ background: DARK, borderColor: BORDER }}
                   data-testid="email-input" />
                 <div className="text-[11px] mt-2 mono" style={{ color: MUTED }}>
-                  If SMS doesn't reach you, the OTP is sent here in parallel.
+                  We deliver your OTP here — it's the reliable channel.
                 </div>
+              </label>
+
+              <label className="block">
+                <div className="mono text-[10px] uppercase tracking-[0.24em] mb-2" style={{ color: MUTED }}>Mobile Number <span style={{ color: "#F87171" }}>*</span></div>
+                <Input value={mobile} onChange={(e) => setMobile(e.target.value.replace(/\D/g, "").slice(0, 10))}
+                  placeholder="10-digit mobile"
+                  className="mono text-lg h-12"
+                  style={{ background: DARK, borderColor: BORDER }}
+                  data-testid="mobile-input" />
+              </label>
+
+              <label className="flex items-center gap-3 cursor-pointer">
+                <input type="checkbox" checked={sendSms} onChange={(e) => setSendSms(e.target.checked)}
+                  className="w-4 h-4 accent-[#FBBF24]"
+                  data-testid="send-sms-check" />
+                <span className="mono text-[11px] uppercase tracking-widest" style={{ color: MUTED }}>
+                  Also send the OTP by SMS <span style={{ color: MUTED }}>(optional redundancy)</span>
+                </span>
               </label>
 
               {tab === "existing" && (
@@ -206,18 +218,20 @@ export default function CustomerEntry() {
                     <div className="grid grid-cols-2 gap-2 mono text-[10px] uppercase tracking-widest">
                       <div className="rounded-md px-3 py-2 flex items-center justify-between"
                            style={{ background: DARK, border: `1px solid ${BORDER}` }}
-                           data-testid="channel-sms">
-                        <span style={{ color: MUTED }}>SMS</span>
-                        <span style={{ color: channelStatus.sms?.delivered ? "#10B981" : "#F87171" }}>
-                          {channelStatus.sms?.delivered ? "delivered" : "failed"}
+                           data-testid="channel-email">
+                        <span style={{ color: MUTED }}>Email</span>
+                        <span style={{ color: channelStatus.email?.delivered ? "#10B981" : "#F87171" }}>
+                          {channelStatus.email?.delivered
+                            ? `delivered · ${channelStatus.email.attempts || 1}×`
+                            : "failed"}
                         </span>
                       </div>
                       <div className="rounded-md px-3 py-2 flex items-center justify-between"
                            style={{ background: DARK, border: `1px solid ${BORDER}` }}
-                           data-testid="channel-email">
-                        <span style={{ color: MUTED }}>Email</span>
-                        <span style={{ color: channelStatus.email == null ? MUTED : channelStatus.email.delivered ? "#10B981" : "#F87171" }}>
-                          {channelStatus.email == null ? "skipped" : channelStatus.email.delivered ? "delivered" : "failed"}
+                           data-testid="channel-sms">
+                        <span style={{ color: MUTED }}>SMS</span>
+                        <span style={{ color: channelStatus.sms == null ? MUTED : channelStatus.sms.delivered ? "#10B981" : "#F87171" }}>
+                          {channelStatus.sms == null ? "skipped" : channelStatus.sms.delivered ? "delivered" : "failed"}
                         </span>
                       </div>
                     </div>

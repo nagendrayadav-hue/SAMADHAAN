@@ -17,7 +17,8 @@ def _sender() -> str:
 
 
 async def send_email(to: str, subject: str, body: str, cc: Optional[list] = None,
-                     bypass_override: bool = False) -> dict:
+                     bypass_override: bool = False, html: Optional[str] = None,
+                     retries: int = 2) -> dict:
     """Send email via Resend. Returns {sent: bool, id?: str, error?: str}.
 
     If TEST_EMAIL_OVERRIDE is set, ALL emails are redirected there so the
@@ -27,6 +28,8 @@ async def send_email(to: str, subject: str, body: str, cc: Optional[list] = None
 
     bypass_override=True skips the redirect entirely — used by escalation so
     the mail goes straight to Manjula Vishal's real address.
+
+    retries — number of extra attempts on transient exceptions (network errors etc).
     """
     key = _resend_key()
     if not key or not to:
@@ -37,25 +40,35 @@ async def send_email(to: str, subject: str, body: str, cc: Optional[list] = None
     if override and override != to:
         subject = f"[FOR: {to}] {subject}"
         body = f"### Original recipient: {to}\n### Redirected via TEST_EMAIL_OVERRIDE\n\n{body}"
+        if html:
+            html = f"<p style='color:#888'><small>Original recipient: <b>{to}</b> — redirected via TEST_EMAIL_OVERRIDE</small></p>{html}"
 
-    try:
-        import resend
-        resend.api_key = key
-        params = {
-            "from": _sender(),
-            "to": [actual_to] if isinstance(actual_to, str) else actual_to,
-            "subject": subject,
-            "text": body,
-        }
-        # Only include CC when we're not overriding (Resend sandbox rejects
-        # every unverified address, including CC recipients).
-        if cc and not override:
-            params["cc"] = cc
-        r = resend.Emails.send(params)
-        return {"sent": True, "id": r.get("id") if isinstance(r, dict) else str(r), "redirected_to": override or None}
-    except Exception as e:
-        logger.warning(f"Resend failure: {e}")
-        return {"sent": False, "error": str(e)}
+    last_error = None
+    for attempt in range(retries + 1):
+        try:
+            import resend
+            resend.api_key = key
+            params = {
+                "from": _sender(),
+                "to": [actual_to] if isinstance(actual_to, str) else actual_to,
+                "subject": subject,
+                "text": body,
+            }
+            if html:
+                params["html"] = html
+            if cc and not override:
+                params["cc"] = cc
+            r = resend.Emails.send(params)
+            return {"sent": True, "id": r.get("id") if isinstance(r, dict) else str(r),
+                    "redirected_to": override or None, "attempts": attempt + 1}
+        except Exception as e:
+            last_error = str(e)
+            msg = last_error.lower()
+            # Don't retry on permanent errors (bad recipient, no permission, invalid API key)
+            if any(w in msg for w in ["verify a domain", "unauthorized", "invalid", "not a valid"]):
+                break
+            logger.warning(f"Resend attempt {attempt + 1}/{retries + 1} failed: {last_error}")
+    return {"sent": False, "error": last_error}
 
 
 # Fixed official email template used by the AI generator
