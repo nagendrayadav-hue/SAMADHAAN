@@ -36,8 +36,9 @@ export default function CustomerEntry() {
   }, []);
 
   useEffect(() => {
-    customerSession.patch({ mobile, email, sendSms, policy, tab, otpVerified });
-  }, [mobile, email, sendSms, policy, tab, otpVerified]);
+    // Persist form fields for a smooth refresh — but never persist the verified flag.
+    customerSession.patch({ mobile, email, sendSms, policy, tab, otpVerified: false });
+  }, [mobile, email, sendSms, policy, tab]);
 
   const emailValid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
 
@@ -86,7 +87,7 @@ export default function CustomerEntry() {
 
   const forgetSession = () => {
     customerSession.clear();
-    setMobile(""); setEmail(""); setPolicy(""); setOtp(""); setOtpSent(false); setOtpVerified(false); setDemoOtp(""); setChannelStatus(null);
+    setMobile(""); setEmail(""); setSendSms(false); setPolicy(""); setOtp(""); setOtpSent(false); setOtpVerified(false); setDemoOtp(""); setChannelStatus(null);
     toast("Session cleared");
   };
 

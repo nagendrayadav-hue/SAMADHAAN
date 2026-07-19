@@ -116,3 +116,10 @@ Multi-role New India Assurance customer service portal ("Samaadhaan") with:
 - Response schema now includes `{sms:{delivered, id, error}, email:{delivered, id, error}}` so the UI can show per-channel status.
 - Frontend Customer entry has a new optional email field; after OTP dispatch, two live status chips indicate SMS + Email delivery independently. Toast copy adapts ("SMS + Email", "SMS only", "Email only (SMS failed)", or "generated but neither confirmed — use demo code").
 - Testing agent report (iteration_3.json): 18 new dual-channel tests + full regression pass on office login / ticket create / escalate / office email routing.
+
+## Update · 2026-07-19 (v3.0) — Universal email delivery + new Twilio
+- **Gmail SMTP is now the PRIMARY email channel.** `mailer.py` refactored: (a) try Gmail SMTP first (`vishalmed92@gmail.com` + app password `ptusnjskhyympkvq`), (b) if SMTP fails, fall back to Resend, (c) legacy `TEST_EMAIL_OVERRIDE` only kicks in as a last resort. Mails now reach ANY recipient — verified live to `julieanderson123j@gmail.com` and `vishalmed92@gmail.com` with real Message-IDs. `TEST_EMAIL_OVERRIDE` removed from .env.
+- **New Twilio credentials wired**: `AC8c273f5e680bc28b5624b63d6489745e` / `+15715866211` / token in .env. SMS returns real `SM…` SIDs.
+- **Email regex hardened** to `^[^\s@]+@[^\s@]+\.[^\s@]+$` — whitespace inside the local part (`"a b@c.com"`) is now correctly rejected (fixes bug found in iteration_4).
+- OTP mandatory-flow reverted — for demo purposes the session-restore "Continue verified" shortcut is back.
+- Testing agent iteration_5.json: 22/22 tests pass covering email validation, SMTP-primary delivery, Twilio SID pattern, notification persistence, verify happy/error, plus full regression on office login, ticket routing, escalation, inbox, analytics, CSV export.

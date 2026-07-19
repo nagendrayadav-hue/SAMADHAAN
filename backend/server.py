@@ -273,12 +273,17 @@ async def draft_email(req: AIEmailReq):
 # ============================================================
 # AUTH — OTP
 # ============================================================
+import re
+
+EMAIL_RE = re.compile(r"^[^\s@]+@[^\s@]+\.[^\s@]+$")
+
+
 @api.post("/auth/otp/send")
 async def send_otp(req: OTPSendReq):
     if len(req.mobile) != 10 or not req.mobile.isdigit():
         raise HTTPException(400, "Mobile must be 10 digits")
     email = (req.email or "").strip()
-    if not email or "@" not in email or "." not in email.split("@")[-1]:
+    if not EMAIL_RE.match(email):
         raise HTTPException(400, "A valid email is required")
     otp = f"{random.randint(100000, 999999)}"
 

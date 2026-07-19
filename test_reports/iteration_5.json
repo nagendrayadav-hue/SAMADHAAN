@@ -1,0 +1,46 @@
+{
+  "summary": "Iteration 5 backend testing verifies the SMTP-primary email delivery + new Twilio credentials + whitespace-in-email regex fix. Created /app/backend/tests/test_iteration5_smtp_twilio.py (22 tests) covering: (1) email validation regex — missing→422, blank→400, 'a b@c.com' (whitespace, iter4 bug) → 400 FIXED, 'a@b' → 400, 'a@b.c' → 200; (2) SMTP-primary delivery — email.delivered=true with provider_id starting '<' AND containing '@oursamadhaan.com' for arbitrary recipients (TEST_ addresses, vishalmed92@gmail.com, julieanderson123j@gmail.com — no TEST_EMAIL_OVERRIDE redirect); (3) SMS opt-in — send_sms=true returns sms.delivered=true with SID starting 'SM' (new Twilio creds AC8c273f5e680bc28b5624b63d6489745e); (4) Notifications persist — email row has channel='otp' + SMTP-shaped provider_id matching response, sms row created and delivered=true when send_sms=true; (5) OTP verify success + wrong-OTP 401; (6) Office login (admin/670100/wrong-pw) + /tickets scope isolation (670100 can't see 940000, admin sees both); (7) Ticket create for 670100 policy → target_email='julieanderson123j@gmail.com' AND its notif row is delivered=true via SMTP; (8) /escalate-auth → delivered:true + email_id + to=manjula.vishal@oursamadhaan.com + fallback_used is bool; (9) /inbox scoped to office mailbox; (10) /analytics/summary shape (total/by_status/by_service/by_priority/by_office/avg_resolution_hours/trend_7d with 7 items); (11) /tickets/export.csv → text/csv with expected header. Full suite (backend_test.py + test_otp_email_primary.py + test_iteration5_smtp_twilio.py) = 84/84 PASSED (100%). Iteration_4's known whitespace bug is now fixed by `EMAIL_RE = re.compile(r'^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$')`. Twilio new-account cap not yet hit — SMS delivery reliably returns SM… SIDs.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "/api/tickets/{id}/escalate", "issue": "STILL UNAUTHENTICATED (carried over from iteration_2/3/4). Only /escalate-auth is guarded — anyone can POST to /escalate directly and trigger a real Gmail send + notification insert."},
+      {"endpoint": "/api/auth/office/login", "issue": "Passwords still stored/compared in plaintext (carried from prior iterations). Now doubly risky since office login gates real email dispatch and JWT issuance."}
+    ]
+  },
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [
+    "/app/backend/tests/test_iteration5_smtp_twilio.py",
+    "/app/backend/tests/test_otp_email_primary.py",
+    "/app/backend/tests/backend_test.py",
+    "/app/test_reports/pytest/iteration_5_full.xml",
+    "/app/test_reports/pytest/iteration_5.xml"
+  ],
+  "action_items": [
+    "(Carried over) Auth-guard /api/tickets/{id}/escalate (currently public — direct POST works without a bearer). Consider merging into /escalate-auth or requiring current_office as a dependency on the raw route.",
+    "(Carried over) Hash office passwords (bcrypt) — plaintext compare in /api/auth/office/login.",
+    "OPTIONAL: With SMTP as primary, the sandbox-fallback branch in /tickets/{id}/escalate (looking for Resend 'verify a domain' error strings) is now effectively dead code — consider removing since Gmail SMTP delivers universally and the string-match heuristic won't catch SMTP errors anyway."
+  ],
+  "critical_code_review_comments": [
+    "mailer._send_smtp: SMTP connection is created per email — for burst sends (bulk escalation) this pays TLS+auth handshake overhead each time. Consider a small connection pool or persistent aiosmtplib client. Also using `smtplib` (sync) inside `async def send_email` blocks the event loop; wrap `_send_smtp` in `await asyncio.to_thread(...)` or switch to `aiosmtplib`.",
+    "server.py send_otp inlines the notification insert with extra fields (channel, attempts) while push_notification helper covers only vanilla email/sms — the two persistence paths have diverged. Consolidate into push_notification(extras=...) so all rows go through one code path.",
+    "The Notification pydantic model still doesn't declare `channel`, `attempts`, `provider_id`, `provider_error`, `delivered`, `read_at`, `read_by`, `cc`, `fallback_used` — these are set at insert time via doc mutation, keeping the collection weakly typed.",
+    "sms.py: Twilio Client instantiated per request — same pooling concern as SMTP. Client is thread-safe and can live at module scope.",
+    "mailer.send_email retry loop retries ALL SMTP failures (including auth/config errors) up to `retries+1` times. On a bad app password this hammers Gmail and could trip rate limiting. Bail out early on `SMTPAuthenticationError` / `SMTPRecipientsRefused`.",
+    "TWILIO_TEST_OVERRIDE=+919980857971 is still active in .env, so every SMS is being redirected to that single number regardless of the user's actual mobile. Response `sms.id` is a real SM… SID but the message body only prefixes `[FOR +91XXXXXXXXXX]`. Verify this is intentional (trial-account safety), otherwise SMSes never actually reach real customer numbers.",
+    "server.py at 970 lines — router split (auth/tickets/notifications/emails) has been recommended in every iteration and remains un-done.",
+    "The OTP HTML template (26 inline lines) is still hard-coded inside send_otp — extract to `/app/backend/templates/otp_email.html` and jinja-render.",
+    "escalate_ticket fallback branch still scans `result.error` for the Resend-sandbox strings 'verify a domain' / 'own email address'. Since SMTP is now primary, Resend is only reached when SMTP fails — those exact error strings will not appear on SMTP failures, so the fallback branch is unreachable in practice. Delete or generalize.",
+    "OTP model persists an `email` field that verify_otp never reads. Either use it (e.g., resend-OTP endpoint) or drop it.",
+    "No test-data cleanup — db.otps, db.notifications, db.tickets grow across iterations. Add a pytest fixture that deletes `to LIKE 'TEST_%'` rows after the module."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iteration5_smtp_twilio.py (new — 22 tests, all passing)"
+  ],
+  "success_rate": {"backend": "100% (84/84 across all suites; 22/22 in iteration_5)", "frontend": "N/A (skipped per request)"},
+  "test_credentials": "Office logins 670100/670100, 940000/940000, admin/admin. Seeded policies: 67010023456789012001 (mobile 9876543210), 67010023456789012002 (9123456780), 94000012345678901001 (9988776655).",
+  "seed_data_creation": "None persistent — tests generate random 10-digit mobiles and TEST_iter5_* / TEST_email_only_* / TEST_dual_* / TEST_persist_smtp_* / TEST_both_smtp_* / TEST_v_* email prefixes. Rows land in db.otps + db.notifications + db.tickets and are NOT cleaned up (retained for trace consistency with iterations 2-4).",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Three test files under /app/backend/tests/: (1) backend_test.py — 36 regression tests; (2) test_otp_email_primary.py — 26 iteration_4 tests (email-primary semantics); (3) test_iteration5_smtp_twilio.py — 22 iteration_5 tests (SMTP delivery + Twilio new creds + whitespace regex). Run with `cd /app/backend && python -m pytest tests/ -v` — expect ~2 min due to real SMTP + Twilio + Emergent LLM calls. SMTP path is now primary via GMAIL_USER=vishalmed92@gmail.com; Resend key is still configured as fallback. Twilio creds swapped (new SID AC8c273f5e...); TWILIO_TEST_OVERRIDE=+919980857971 still redirects every SMS to that number. Iteration_4 whitespace-email bug is FIXED via EMAIL_RE regex in server.py. All 84 tests currently green.",
+  "rca of the issue": "Iteration_4 whitespace-email bug root-caused to loose `if '@' in email and '.' in email.split('@')[-1]`. Fix applied in server.py: `EMAIL_RE = re.compile(r'^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$')` and `if not EMAIL_RE.match(email): raise HTTPException(400, ...)`. Verified via curl + pytest — 'a b@c.com' now returns HTTP 400 while 'a@b.c' correctly returns 200."
+}

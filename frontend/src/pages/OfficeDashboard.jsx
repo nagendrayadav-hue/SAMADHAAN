@@ -14,6 +14,7 @@ import { toast } from "sonner";
 import { LogOut, Volume2, AlertTriangle, Clock, CheckCircle2, Bell, RefreshCcw, Download, Search, BarChart3, Mail, Inbox as InboxIcon, MailOpen, ChevronRight } from "lucide-react";
 import AIEmail from "@/components/AIEmail";
 import EscalateModal from "@/components/EscalateModal";
+import SlaHourglass from "@/components/SlaHourglass";
 
 const DARK = "#080C14", PANEL = "#0F1626", BORDER = "#1E293B", GOLD = "#FBBF24", BLUE = "#3B82F6", GREEN = "#10B981", MUTED = "#94A3B8", LIGHT = "#F1F5F9";
 
@@ -426,7 +427,7 @@ export default function OfficeDashboard() {
           </DialogHeader>
           {active && (
             <div className="space-y-5">
-              <div className="flex gap-2 flex-wrap">
+              <div className="flex gap-2 flex-wrap items-center">
                 <span className="px-2.5 py-1 rounded-md mono text-[10px] uppercase tracking-widest"
                   style={{ background: statusPill[active.status].bg, color: statusPill[active.status].color, border: `1px solid ${statusPill[active.status].border}` }}>
                   {active.status}
@@ -436,6 +437,7 @@ export default function OfficeDashboard() {
                   {active.priority}
                 </span>
                 {active.sentiment && <Badge variant="outline" style={{ borderColor: BORDER, color: MUTED }}>{active.sentiment}</Badge>}
+                <SlaHourglass createdAt={active.created_at} status={active.status} size="lg" />
               </div>
               <div className="grid grid-cols-2 gap-3 text-sm mono">
                 <div><span className="text-[10px] uppercase tracking-widest" style={{ color: MUTED }}>Mobile · </span>{active.mobile}</div>
@@ -594,6 +596,7 @@ function TicketListBlock({ tickets, q, setQ, serviceF, setServiceF, priorityF, s
                       style={{ background: s.bg, color: s.color, border: `1px solid ${s.border}` }}>{t.status}</span>
                     <span className="px-2.5 py-1 rounded-md mono text-[10px] uppercase tracking-widest"
                       style={{ background: pr.bg, color: pr.color, border: `1px solid ${pr.border}` }}>{t.priority}</span>
+                    <SlaHourglass createdAt={t.created_at} status={t.status} size="md" />
                   </div>
                   {t.escalated && (
                     <div className="text-[10px] mono flex items-center gap-1" style={{ color: "#F87171" }}>
