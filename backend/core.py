@@ -86,5 +86,5 @@ LANG_MAP = {
     "pa": "Punjabi", "en": "English",
 }
 
-HIGHER_AUTHORITY_EMAIL = "manjula.vishal@newindia.co.in"
-CALL_CENTER_EMAIL = "ravikant.vishal@newindia.co.in"
+HIGHER_AUTHORITY_EMAIL = "manjula.vishal@oursamadhaan.com"
+CALL_CENTER_EMAIL = "ravikant.vishl@oursamadhaan.com"

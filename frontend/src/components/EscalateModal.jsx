@@ -9,8 +9,8 @@ import { toast } from "sonner";
 
 const DARK = "#080C14", PANEL = "#0F1626", BORDER = "#1E293B", GOLD = "#FBBF24", MUTED = "#94A3B8", LIGHT = "#F1F5F9";
 
-const APP_NAME = "Samaadhaan (New India Assurance grievance portal)";
-const MANJULA = "manjula.vishal@newindia.co.in";
+const APP_NAME = "Samaadhaan (#OurSamadhaan grievance portal)";
+const MANJULA = "manjula.vishal@oursamadhaan.com";
 
 function buildBody({ customerName, caseId, adminName, priority, description, findings, businessImpact }) {
   return `Dear Manjula,

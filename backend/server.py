@@ -1,4 +1,4 @@
-"""Samaadhaan API — New India Assurance grievance portal.
+"""Samaadhaan API — #OurSamadhaan grievance portal.
 
 Enhancements over v1:
   - Structured models (BaseDocument, PyObjectId pattern)
@@ -124,14 +124,20 @@ async def seed_data():
         ]:
             await db.policies.insert_one(p.to_mongo())
 
-    # Unified mailbox format: nia.{code}@newindia.co.in for policy/claims/grievance/general.
+    # Unified mailbox per office code. Real gmail addresses are used for
+    # regional partitions so demo deliveries actually land in a mailbox.
+    OFFICE_MAILBOXES = {
+        "670100": "julieanderson123j@gmail.com",
+        "940000": "vishalmed92@gmail.com",
+        "admin":  "admin@oursamadhaan.com",
+    }
     unified_offices = [
         ("670100", "Mumbai Regional Office"),
         ("940000", "Delhi Regional Office"),
         ("admin", "Admin (All Offices)"),
     ]
     for code, name in unified_offices:
-        mailbox = f"nia.{code}@newindia.co.in"
+        mailbox = OFFICE_MAILBOXES[code]
         await db.offices.update_one(
             {"code": code},
             {"$set": {"email": mailbox, "claims_email": mailbox, "grievance_email": mailbox, "name": name},
@@ -143,6 +149,8 @@ async def seed_data():
 # ---------- request payloads ----------
 class OTPSendReq(BaseModel):
     mobile: str
+    email: str                        # now REQUIRED — primary OTP channel
+    send_sms: bool = False            # SMS is optional, opt-in for redundancy
 
 class OTPVerifyReq(BaseModel):
     mobile: str
@@ -218,7 +226,7 @@ async def draft_email(req: AIEmailReq):
         signer_name = req.signer_name or (off.get("name") if off else "Office")
         signer_designation = req.signer_designation or chief_designation(t["service_type"])
         department = department_for(t["service_type"])
-        company = "New India Assurance"
+        company = "#OurSamadhaan"
 
     body = OFFICIAL_TEMPLATE.format(
         team=team,
@@ -269,17 +277,91 @@ async def draft_email(req: AIEmailReq):
 async def send_otp(req: OTPSendReq):
     if len(req.mobile) != 10 or not req.mobile.isdigit():
         raise HTTPException(400, "Mobile must be 10 digits")
+    email = (req.email or "").strip()
+    if not email or "@" not in email or "." not in email.split("@")[-1]:
+        raise HTTPException(400, "A valid email is required")
     otp = f"{random.randint(100000, 999999)}"
-    otp_doc = OTP(mobile=req.mobile, otp=otp)
+
+    otp_doc = OTP(mobile=req.mobile, otp=otp, email=email)
     await db.otps.update_one(
         {"mobile": req.mobile},
         {"$set": otp_doc.to_mongo()},
         upsert=True,
     )
-    await push_notification(type="sms", to=req.mobile,
-                            message=f"Your Samaadhaan OTP is {otp}. Valid for 5 minutes.")
-    await audit(f"customer:{req.mobile}", "otp_sent", "otp", req.mobile)
-    return {"status": "sent", "demo_otp": otp}
+
+    # Primary channel — Email (reinforced: HTML + retry + branded)
+    subject = "Your Samaadhaan OTP · valid for 5 minutes"
+    text_body = (
+        f"Hello,\n\n"
+        f"Your one-time password to sign in to Samaadhaan is:\n\n"
+        f"    {otp}\n\n"
+        f"This code is valid for 5 minutes. If you did not request it, please ignore this message.\n\n"
+        f"— #OurSamadhaan"
+    )
+    html_body = f"""<!doctype html>
+<html><body style="margin:0;padding:0;background:#080C14;font-family:Geist,Segoe UI,Arial,sans-serif;color:#F1F5F9">
+  <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="padding:32px 16px;background:#080C14">
+    <tr><td align="center">
+      <table role="presentation" cellpadding="0" cellspacing="0" width="480" style="max-width:480px;background:#0F1626;border:1px solid #1E293B;border-radius:16px;padding:32px">
+        <tr><td>
+          <div style="display:inline-block;background:#FBBF24;color:#080C14;font-weight:800;font-size:16px;padding:4px 10px;border-radius:6px;letter-spacing:-0.5px">S</div>
+          <div style="font-size:12px;text-transform:uppercase;letter-spacing:0.24em;color:#94A3B8;margin-top:16px">Verification code</div>
+          <h1 style="font-family:'Dela Gothic One',Georgia,serif;color:#F1F5F9;font-size:36px;margin:8px 0 24px 0;letter-spacing:-0.02em">Sign in to Samaadhaan.</h1>
+          <p style="color:#94A3B8;font-size:14px;line-height:1.6;margin:0 0 24px 0">
+            Enter this 6-digit code on the verification screen. It's valid for the next <b style="color:#F1F5F9">5 minutes</b>.
+          </p>
+          <div style="background:#080C14;border:1px solid #1E293B;border-radius:12px;padding:24px;text-align:center;font-family:'Geist Mono',ui-monospace,monospace;font-size:34px;letter-spacing:14px;color:#FBBF24;font-weight:700">
+            {otp}
+          </div>
+          <p style="color:#94A3B8;font-size:12px;line-height:1.6;margin:24px 0 0 0">
+            If you didn't request this, no action is needed — the code expires automatically.
+          </p>
+          <hr style="border:none;border-top:1px solid #1E293B;margin:24px 0"/>
+          <p style="color:#475569;font-size:11px;text-transform:uppercase;letter-spacing:0.22em;margin:0;font-family:'Geist Mono',ui-monospace,monospace">
+            #OurSamadhaan · Grievance Redressal Portal
+          </p>
+        </td></tr>
+      </table>
+    </td></tr>
+  </table>
+</body></html>"""
+
+    email_result = await send_email(email, subject, text_body, html=html_body, retries=2)
+    email_notif = Notification(type="email", to=email, subject=subject, message=text_body)
+    edoc = email_notif.to_mongo()
+    edoc["delivered"] = email_result.get("sent", False)
+    edoc["provider_id"] = email_result.get("id")
+    edoc["provider_error"] = email_result.get("error")
+    edoc["channel"] = "otp"
+    edoc["attempts"] = email_result.get("attempts", 1)
+    await db.notifications.insert_one(edoc)
+
+    # Optional redundancy — SMS via Twilio (only when opted in)
+    sms_result = None
+    if req.send_sms:
+        sms_notif = await push_notification(
+            type="sms", to=req.mobile,
+            message=f"Your Samaadhaan OTP is {otp}. Valid for 5 minutes.",
+        )
+        sms_row = await db.notifications.find_one({"id": sms_notif.id}, {"_id": 0}) or {}
+        sms_result = {
+            "delivered": sms_row.get("delivered", False),
+            "id": sms_row.get("provider_id"),
+            "error": sms_row.get("provider_error"),
+        }
+
+    await audit(f"customer:{req.mobile}", "otp_sent", "otp", req.mobile,
+                {"email": email, "email_delivered": email_result.get("sent", False),
+                 "sms_opt_in": req.send_sms})
+    return {
+        "status": "sent",
+        "demo_otp": otp,
+        "email": {"delivered": email_result.get("sent", False),
+                  "id": email_result.get("id"),
+                  "error": email_result.get("error"),
+                  "attempts": email_result.get("attempts", 1)},
+        "sms": sms_result,
+    }
 
 
 @api.post("/auth/otp/verify")
@@ -392,13 +474,13 @@ async def create_ticket(req: TicketCreateReq):
     # Resolve target email
     off = await db.offices.find_one({"code": office_code}, {"_id": 0})
     if service_type == "claims":
-        target_email = off["claims_email"] if off else "claims@newindia.co.in"
+        target_email = off["claims_email"] if off else "claims@oursamadhaan.com"
     elif service_type == "grievance":
-        target_email = off["grievance_email"] if off else "grievance@newindia.co.in"
+        target_email = off["grievance_email"] if off else "grievance@oursamadhaan.com"
     elif req.customer_type == "new":
         target_email = CALL_CENTER_EMAIL
     else:
-        target_email = off["email"] if off else "office@newindia.co.in"
+        target_email = off["email"] if off else "office@oursamadhaan.com"
 
     ticket_id = build_ticket_id(req.mobile, req.policy_no)
     ticket = Ticket(
@@ -424,7 +506,7 @@ async def create_ticket(req: TicketCreateReq):
         signer_name="Samaadhaan Bot",
         signer_designation="Automated Intake",
         department="Customer Dispatch Cell",
-        company="New India Assurance",
+        company="#OurSamadhaan",
     )
     await push_notification(
         type="email", to=target_email,
@@ -433,7 +515,7 @@ async def create_ticket(req: TicketCreateReq):
     await push_notification(
         type="sms", to=req.mobile,
         message=(
-            f"Your issue has been escalated. Ticket: {ticket_id}. Someone from New India will call you shortly."
+            f"Your issue has been escalated. Ticket: {ticket_id}. Someone from #OurSamadhaan will call you shortly."
             if req.customer_type == "new"
             else f"Issue reported. Ticket: {ticket_id}. Concerned office will respond within 24 hours."
         ),
@@ -586,7 +668,7 @@ async def escalate_ticket(ticket_pk: str, payload: Optional[dict] = None, _actor
     """Escalate manually or from scheduler.
 
     Auto-sends a contextual, AI-drafted email through Resend directly to
-    manjula.vishal@newindia.co.in (CC: office). No SMS is triggered.
+    manjula.vishal@oursamadhaan.com (CC: office). No SMS is triggered.
     """
     t = await db.tickets.find_one({"id": ticket_pk}, {"_id": 0})
     if not t:
@@ -657,7 +739,7 @@ async def escalate_ticket(ticket_pk: str, payload: Optional[dict] = None, _actor
         signer_name="Samaadhaan Automated Escalation",
         signer_designation="24h SLA Watchdog",
         department="Grievance Cell",
-        company="New India Assurance",
+        company="#OurSamadhaan",
     )
 
     # Auto-deliver through Resend, straight to Manjula (no override).

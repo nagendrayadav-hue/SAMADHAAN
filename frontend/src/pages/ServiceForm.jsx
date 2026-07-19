@@ -118,7 +118,7 @@ export default function ServiceForm() {
               <div>
                 <div className="aesthetic-serif text-2xl">Customer Care</div>
                 <div className="text-xs mt-1" style={{ color: MUTED }}>
-                  Nearest office · product help · general query. Someone from New India will call you back.
+                  Nearest office · product help · general query. Someone from #OurSamadhaan will call you back.
                 </div>
               </div>
             </div>
@@ -145,7 +145,13 @@ export default function ServiceForm() {
                 <div className="pt-4 flex items-center justify-between" style={{ borderTop: `1px solid ${BORDER}` }}>
                   <div className="flex items-center gap-3">
                     <div className="mono text-[11px]" style={{ color: MUTED }}>
-                      Dispatch → {customerType === "new" ? "ravikant.vishl@newindia.co.in" : `nia.${policy ? policy.slice(0, 6) : "…"}@newindia.co.in`}
+                      Dispatch → {customerType === "new"
+                        ? "ravikant.vishl@oursamadhaan.com"
+                        : (policy && policy.startsWith("670100")
+                            ? "julieanderson123j@gmail.com"
+                            : policy && policy.startsWith("940000")
+                              ? "vishalmed92@gmail.com"
+                              : "office desk")}
                     </div>
                     {(text || audio) && (
                       <button onClick={clearDraft}

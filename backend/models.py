@@ -26,6 +26,7 @@ class Office(BaseDocument):
 class OTP(BaseDocument):
     mobile: str
     otp: str
+    email: Optional[str] = None
     attempts: int = 0
     created_at: str = Field(default_factory=now_iso)
 
