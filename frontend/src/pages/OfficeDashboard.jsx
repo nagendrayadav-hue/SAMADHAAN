@@ -116,10 +116,17 @@ export default function OfficeDashboard() {
     if (m.ticket) openTicket(m.ticket);
   };
 
-  const openTicket = (t) => {
+  const openTicket = async (t) => {
+    // Set immediately for snappy UI, then fetch the full record (including
+    // audio_base64) which is intentionally excluded from list queries to
+    // keep the dashboard responsive on memory-constrained hosts.
     setActive(t);
     setSolution(t.solution_text || "");
     setTargetLang(t.solution_language || t.language || "hi");
+    try {
+      const r = await api.get(`/tickets/${t.id}`);
+      setActive(r.data);
+    } catch {}
   };
 
   const resolve = async () => {
