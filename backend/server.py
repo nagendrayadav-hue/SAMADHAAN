@@ -553,11 +553,18 @@ async def list_tickets(
         ]
     total = await db.tickets.count_documents(query)
     skip = (page - 1) * limit
-    items = await db.tickets.find(query, {"_id": 0}).sort("created_at", -1).skip(skip).limit(limit).to_list(limit)
+    # Exclude `audio_base64` from the list query — it can be 100KB–2MB per
+    # ticket (base64 voice notes). Bulk-returning it OOMs Render's free tier
+    # (512MB) after ~50 tickets. Audio is fetched on demand via the single
+    # ticket endpoint /tickets/{ticket_pk}.
+    projection = {"_id": 0, "audio_base64": 0}
+    items = await db.tickets.find(query, projection).sort("created_at", -1).skip(skip).limit(limit).to_list(limit)
     return {"total": total, "page": page, "limit": limit, "items": items}
 
 
-# Public endpoint kept for customer history (no auth needed for own mobile)
+# Public endpoint kept for customer history (no auth needed for own mobile).
+# Includes `audio_base64` because a customer typically has only a handful of
+# tickets — memory impact is negligible and they want to hear their own note.
 @api.get("/history/{mobile}")
 async def customer_history(mobile: str):
     if len(mobile) != 10 or not mobile.isdigit():
@@ -579,11 +586,14 @@ async def inbox(payload: dict = Depends(current_office), limit: int = Query(100,
         else:
             return []
     mails = await db.notifications.find(query, {"_id": 0}).sort("created_at", -1).to_list(limit)
-    # Enrich with ticket data
+    # Enrich with ticket data — but exclude the big audio blob so we don't
+    # blow memory on Render's 512MB free tier.
     ticket_ids = [m.get("ticket_id") for m in mails if m.get("ticket_id")]
     tmap: dict[str, Any] = {}
     if ticket_ids:
-        async for t in db.tickets.find({"ticket_id": {"$in": ticket_ids}}, {"_id": 0}):
+        async for t in db.tickets.find(
+            {"ticket_id": {"$in": ticket_ids}}, {"_id": 0, "audio_base64": 0}
+        ):
             tmap[t["ticket_id"]] = t
     for m in mails:
         m["ticket"] = tmap.get(m.get("ticket_id"))
@@ -828,7 +838,11 @@ async def _run_auto_escalate(actor: str = "system") -> dict:
 @api.get("/analytics/summary")
 async def analytics_summary(payload: dict = Depends(current_office)):
     scope = office_scope_query(payload)
-    tickets = await db.tickets.find(scope, {"_id": 0}).to_list(2000)
+    # Same audio exclusion — analytics only needs status/service/priority/etc.,
+    # never the audio blob. Skipping it keeps memory flat on Render free tier.
+    tickets = await db.tickets.find(
+        scope, {"_id": 0, "audio_base64": 0, "parsed_text": 0, "solution_text": 0, "solution_translated": 0}
+    ).to_list(2000)
     total = len(tickets)
     by_status = {"Open": 0, "InProgress": 0, "Escalated": 0, "Done": 0}
     by_service = {"policy": 0, "claims": 0, "grievance": 0, "service": 0}
@@ -972,7 +986,7 @@ async def on_stop():
     mongo_client.close()
 
 # ---------- Health / self-diagnostic ----------
-BUILD_TAG = "2026-07-19_instant_otp_smtp_circuitbreaker"
+BUILD_TAG = "2026-07-19_dashboard_projection_fix"
 
 
 @api.get("/health/version")
